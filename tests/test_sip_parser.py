@@ -85,6 +85,30 @@ class TestParseResponse:
         assert msg.status_code == 404
         assert msg.reason == "Not Found"
 
+    def test_parse_200_ok_missing_to_tag(self):
+        raw = (
+            b"SIP/2.0 200 OK\r\n"
+            b"To: <sip:bob@127.0.0.1:5061>\r\n"
+            b"Call-ID: callid001\r\n"
+            b"Content-Length: 0\r\n"
+            b"\r\n"
+        )
+        msg = parse(raw)
+        assert isinstance(msg, SipResponse)
+        assert msg.get_header("To") == "<sip:bob@127.0.0.1:5061>"
+
+    def test_parse_200_ok_empty_to_tag(self):
+        raw = (
+            b"SIP/2.0 200 OK\r\n"
+            b"To: <sip:bob@127.0.0.1:5061>;tag=\r\n"
+            b"Call-ID: callid001\r\n"
+            b"Content-Length: 0\r\n"
+            b"\r\n"
+        )
+        msg = parse(raw)
+        assert isinstance(msg, SipResponse)
+        assert msg.get_header("To") == "<sip:bob@127.0.0.1:5061>;tag="
+
 
 class TestParseErrors:
     def test_empty_bytes_raises(self):

@@ -136,9 +136,25 @@ class CallerSession:
             return False
 
         # Extract To-tag for subsequent requests
-        to_header = msg.get_header("To")
-        if ";tag=" in to_header:
-            self.to_tag = to_header.split(";tag=", 1)[1].split(";")[0]
+        to_header = msg.get_header("To").strip()
+        if not to_header:
+            logger.error("Received 200 OK without To header")
+            self.state = CallerState.TERMINATED
+            return False
+
+        to_tag = ""
+        for param in to_header.split(";")[1:]:
+            key, sep, value = param.strip().partition("=")
+            if sep and key.lower() == "tag":
+                to_tag = value.strip()
+                break
+
+        if not to_tag:
+            logger.error("Received 200 OK without valid To-tag")
+            self.state = CallerState.TERMINATED
+            return False
+
+        self.to_tag = to_tag
 
         # Parse remote SDP
         if msg.body:
