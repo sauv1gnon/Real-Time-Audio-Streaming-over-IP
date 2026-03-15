@@ -26,6 +26,14 @@ def _try_import_sounddevice():
         return None
 
 
+def _try_import_numpy():
+    try:
+        import numpy as np  # type: ignore
+        return np
+    except Exception:
+        return None
+
+
 class AudioPlaybackSink:
     """Receives PCM frames and plays them or writes them to a WAV file.
 
@@ -98,7 +106,9 @@ class AudioPlaybackSink:
     # ------------------------------------------------------------------
 
     def _playback_loop(self) -> None:
-        import numpy as np  # type: ignore — optional; only needed for sounddevice path
+        np = _try_import_numpy() if self._sd is not None else None
+        if self._sd is not None and np is None:
+            logger.info("numpy unavailable - live playback disabled; audio saved to file only")
 
         while not self._stop_event.is_set() or not self._queue.empty():
             try:
@@ -111,7 +121,7 @@ class AudioPlaybackSink:
                 self._wav_out.writeframes(frame)
 
             # Live playback
-            if self._sd is not None:
+            if self._sd is not None and np is not None:
                 try:
                     audio = np.frombuffer(frame, dtype=np.int16)
                     self._sd.play(audio, samplerate=self.sample_rate, blocking=False)
