@@ -111,7 +111,7 @@ def run() -> None:
         get_stats=lambda: (
             sender.packets_sent,
             sender.bytes_sent,
-            0,  # current RTP timestamp not tracked separately
+            sender.current_timestamp,
         ),
     )
     reporter.start()

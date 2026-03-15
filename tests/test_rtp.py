@@ -3,6 +3,7 @@
 import struct
 import pytest
 from rtp.packet import RtpPacket, _HEADER_SIZE
+from rtp.sender import RtpSender
 from core.exceptions import RtpError
 
 
@@ -102,3 +103,34 @@ class TestRtpRoundTrip:
         pkt = RtpPacket(payload_type=0, sequence_number=0xFFFF, timestamp=0, ssrc=0, payload=b"")
         parsed = RtpPacket.parse(pkt.serialize())
         assert parsed.sequence_number == 0xFFFF
+
+
+class _DummyUdpSocket:
+    def __init__(self):
+        self.sent: list[tuple[bytes, str, int]] = []
+
+    def send(self, data: bytes, remote_ip: str, remote_port: int) -> None:
+        self.sent.append((data, remote_ip, remote_port))
+
+
+class TestRtpSenderTimestamp:
+    def test_current_timestamp_exposed(self):
+        sender = RtpSender(_DummyUdpSocket(), "127.0.0.1", 5004, frame_duration_ms=0.0)
+        assert sender.current_timestamp == sender._timestamp
+
+    def test_current_timestamp_increments_after_send(self):
+        sender = RtpSender(_DummyUdpSocket(), "127.0.0.1", 5004, frame_duration_ms=0.0)
+        initial = sender.current_timestamp
+
+        sender.send_frames(iter([b"\x00\x01" * 160]))
+
+        assert sender.current_timestamp == (initial + sender.samples_per_frame) & 0xFFFFFFFF
+
+    def test_current_timestamp_wraps(self):
+        sender = RtpSender(_DummyUdpSocket(), "127.0.0.1", 5004, frame_duration_ms=0.0)
+        sender._timestamp = 0xFFFFFFFF - 10
+
+        sender.send_frames(iter([b"\x00\x01" * 160]))
+
+        expected = (0xFFFFFFFF - 10 + sender.samples_per_frame) & 0xFFFFFFFF
+        assert sender.current_timestamp == expected

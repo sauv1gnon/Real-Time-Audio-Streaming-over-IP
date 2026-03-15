@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import random
-import time
 from typing import Iterator
 
 from core.log import get_logger
@@ -74,6 +73,10 @@ class RtpSender:
     @property
     def bytes_sent(self) -> int:
         return self._bytes_sent
+
+    @property
+    def current_timestamp(self) -> int:
+        return self._timestamp
 
     def send_frames(self, frames: Iterator[bytes], stop_event=None) -> None:
         """Send each frame in *frames* as one RTP packet, paced in real time.
