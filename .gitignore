@@ -1,0 +1,20 @@
+# Python byte-code cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyc
+
+# Pytest cache
+.pytest_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Generated output
+received_audio.wav
+
+# OS artifacts
+.DS_Store
+Thumbs.db
