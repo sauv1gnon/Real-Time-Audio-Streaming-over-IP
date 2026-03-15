@@ -125,6 +125,26 @@ class TestParseErrors:
         with pytest.raises(SipParseError):
             parse(raw)
 
+    def test_rejects_non_sip2_request(self):
+        raw = b"INVITE sip:bob@127.0.0.1 SIP/1.0\r\n\r\n"
+        with pytest.raises(SipParseError, match="Unsupported SIP version"):
+            parse(raw)
+
+    def test_rejects_status_code_out_of_range(self):
+        raw = b"SIP/2.0 9999 Invalid\r\n\r\n"
+        with pytest.raises(SipParseError, match="out of range"):
+            parse(raw)
+
+    def test_rejects_negative_content_length(self):
+        raw = b"SIP/2.0 200 OK\r\nContent-Length: -1\r\n\r\n"
+        with pytest.raises(SipParseError, match="Content-Length out of range"):
+            parse(raw)
+
+    def test_rejects_content_length_larger_than_body(self):
+        raw = b"SIP/2.0 200 OK\r\nContent-Length: 10\r\n\r\nabc"
+        with pytest.raises(SipParseError, match="exceeds available body"):
+            parse(raw)
+
 
 class TestRoundTrip:
     """Ensure that serialised messages can be parsed back correctly."""

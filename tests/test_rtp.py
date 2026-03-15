@@ -3,6 +3,7 @@
 import struct
 import pytest
 from rtp.packet import RtpPacket, _HEADER_SIZE
+from rtp.jitter_buffer import JitterBuffer
 from rtp.sender import RtpSender
 from core.exceptions import RtpError
 
@@ -113,6 +114,11 @@ class _DummyUdpSocket:
         self.sent.append((data, remote_ip, remote_port))
 
 
+class _FailingUdpSocket:
+    def send(self, data: bytes, remote_ip: str, remote_port: int) -> None:
+        raise OSError("simulated send failure")
+
+
 class TestRtpSenderTimestamp:
     def test_current_timestamp_exposed(self):
         sender = RtpSender(_DummyUdpSocket(), "127.0.0.1", 5004, frame_duration_ms=0.0)
@@ -134,3 +140,24 @@ class TestRtpSenderTimestamp:
 
         expected = (0xFFFFFFFF - 10 + sender.samples_per_frame) & 0xFFFFFFFF
         assert sender.current_timestamp == expected
+
+    def test_send_failure_is_counted_and_stops_cleanly(self):
+        sender = RtpSender(_FailingUdpSocket(), "127.0.0.1", 5004, frame_duration_ms=0.0)
+
+        sender.send_frames(iter([b"\x00\x01" * 160]))
+
+        assert sender.send_errors == 1
+        assert sender.packets_sent == 0
+        assert sender.bytes_sent == 0
+
+
+class TestJitterBuffer:
+    def test_flush_preserves_wraparound_order(self):
+        jb = JitterBuffer(max_depth=3)
+
+        assert jb.push(65533, b"a") == [b"a"]
+        assert jb.push(65535, b"c") == []
+        assert jb.push(0, b"d") == []
+        flushed = jb.push(1, b"e")
+
+        assert flushed == [b"c", b"d", b"e"]

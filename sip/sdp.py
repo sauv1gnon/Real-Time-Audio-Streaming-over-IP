@@ -6,6 +6,7 @@ Only the subset required by the project is supported:
 
 from __future__ import annotations
 
+import ipaddress
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -88,12 +89,17 @@ class SdpDescription:
 
             elif key == "c":
                 parts = value.split()
-                if len(parts) >= 3:
-                    desc.media_ip = parts[2]
+                if len(parts) < 3:
+                    raise SdpError(f"Malformed c= line: {line!r}")
+                try:
+                    ipaddress.IPv4Address(parts[2])
+                except ipaddress.AddressValueError as exc:
+                    raise SdpError(f"Invalid IPv4 address in c= line: {parts[2]!r}") from exc
+                desc.media_ip = parts[2]
 
             elif key == "m":
                 parts = value.split()
-                if len(parts) < 3:
+                if len(parts) < 4:
                     raise SdpError(f"Malformed m= line: {line!r}")
                 if parts[0] != "audio":
                     raise SdpError(f"Unsupported media type: {parts[0]!r}")
@@ -101,11 +107,14 @@ class SdpDescription:
                     desc.rtp_port = int(parts[1])
                 except ValueError as exc:
                     raise SdpError(f"Invalid RTP port: {parts[1]!r}") from exc
-                if parts:
-                    try:
-                        desc.payload_type = int(parts[3])
-                    except (IndexError, ValueError):
-                        pass  # Keep default PT
+                if not 1 <= desc.rtp_port <= 65535:
+                    raise SdpError(f"RTP port out of range: {desc.rtp_port}")
+                try:
+                    desc.payload_type = int(parts[3])
+                except ValueError as exc:
+                    raise SdpError(f"Invalid payload type: {parts[3]!r}") from exc
+                if not 0 <= desc.payload_type <= 127:
+                    raise SdpError(f"Payload type out of range: {desc.payload_type}")
 
             elif key == "a":
                 if value.startswith("rtpmap:"):
@@ -113,17 +122,21 @@ class SdpDescription:
                     pt_str, _, codec_info = rest.partition(" ")
                     try:
                         desc.payload_type = int(pt_str)
-                    except ValueError:
-                        pass
-                    if "/" in codec_info:
-                        codec_name, _, rate_str = codec_info.partition("/")
-                        desc.codec_name = codec_name.strip()
-                        try:
-                            desc.clock_rate = int(rate_str.strip())
-                        except ValueError:
-                            pass
-                    else:
-                        desc.codec_name = codec_info.strip()
+                    except ValueError as exc:
+                        raise SdpError(f"Invalid rtpmap payload type: {pt_str!r}") from exc
+                    if not codec_info or "/" not in codec_info:
+                        raise SdpError(f"Malformed rtpmap attribute: {value!r}")
+                    codec_name, _, rate_str = codec_info.partition("/")
+                    codec_name = codec_name.strip()
+                    if not codec_name:
+                        raise SdpError(f"Missing codec name in rtpmap: {value!r}")
+                    desc.codec_name = codec_name
+                    try:
+                        desc.clock_rate = int(rate_str.strip())
+                    except ValueError as exc:
+                        raise SdpError(f"Invalid codec rate in rtpmap: {value!r}") from exc
+                    if desc.clock_rate <= 0:
+                        raise SdpError(f"Clock rate must be positive: {desc.clock_rate}")
                 else:
                     desc.extra_attrs.append(value)
 

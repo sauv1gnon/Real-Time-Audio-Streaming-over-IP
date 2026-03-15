@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import socket
+import pytest
 
 from sip.messages import SipRequest, SipResponse
 from sip.parser import parse
 from sip.sdp import SdpDescription
 from sip.session import CallerSession, CallerState
+from core.exceptions import SessionError
 
 
 class _FakeUdpSocket:
@@ -34,12 +36,12 @@ def _offer_sdp() -> SdpDescription:
     )
 
 
-def _build_200_ok(to_header: str) -> bytes:
+def _build_200_ok(to_header: str, call_id: str) -> bytes:
     resp = SipResponse(200, "OK")
     resp.set_header("Via", "SIP/2.0/UDP 127.0.0.1:5060;branch=z9hG4bKtest")
     resp.set_header("From", "<sip:client1@127.0.0.1:5060>;tag=fromtag")
     resp.set_header("To", to_header)
-    resp.set_header("Call-ID", "call-id")
+    resp.set_header("Call-ID", call_id)
     resp.set_header("CSeq", "1 INVITE")
     resp.set_header("Content-Length", "0")
     return resp.serialize()
@@ -57,9 +59,10 @@ def _new_session(fake_sock: _FakeUdpSocket) -> CallerSession:
 
 
 def test_receive_200_ok_missing_to_tag_fails():
-    fake_sock = _FakeUdpSocket([_build_200_ok("<sip:client2@127.0.0.1:5061>")])
+    fake_sock = _FakeUdpSocket([])
     session = _new_session(fake_sock)
     session.send_invite()
+    fake_sock._responses = [_build_200_ok("<sip:client2@127.0.0.1:5061>", session.call_id)]
 
     assert session.receive_200_ok() is False
     assert session.state == CallerState.TERMINATED
@@ -67,9 +70,10 @@ def test_receive_200_ok_missing_to_tag_fails():
 
 
 def test_receive_200_ok_empty_to_tag_fails():
-    fake_sock = _FakeUdpSocket([_build_200_ok("<sip:client2@127.0.0.1:5061>;tag=")])
+    fake_sock = _FakeUdpSocket([])
     session = _new_session(fake_sock)
     session.send_invite()
+    fake_sock._responses = [_build_200_ok("<sip:client2@127.0.0.1:5061>;tag=", session.call_id)]
 
     assert session.receive_200_ok() is False
     assert session.state == CallerState.TERMINATED
@@ -78,9 +82,10 @@ def test_receive_200_ok_empty_to_tag_fails():
 
 def test_receive_200_ok_valid_to_tag_sends_ack():
     to_tag = "dialog123"
-    fake_sock = _FakeUdpSocket([_build_200_ok(f"<sip:client2@127.0.0.1:5061>;tag={to_tag}")])
+    fake_sock = _FakeUdpSocket([])
     session = _new_session(fake_sock)
     session.send_invite()
+    fake_sock._responses = [_build_200_ok(f"<sip:client2@127.0.0.1:5061>;tag={to_tag}", session.call_id)]
 
     assert session.receive_200_ok() is True
     assert session.state == CallerState.ESTABLISHED
@@ -91,3 +96,19 @@ def test_receive_200_ok_valid_to_tag_sends_ack():
     assert isinstance(ack, SipRequest)
     assert ack.method == "ACK"
     assert f";tag={to_tag}" in ack.get_header("To")
+
+
+def test_receive_200_ok_call_id_mismatch_fails():
+    fake_sock = _FakeUdpSocket([])
+    session = _new_session(fake_sock)
+    session.send_invite()
+    fake_sock._responses = [_build_200_ok("<sip:client2@127.0.0.1:5061>;tag=ok", "different-call-id")]
+
+    assert session.receive_200_ok() is False
+    assert session.state == CallerState.TERMINATED
+
+
+def test_send_bye_invalid_state_raises():
+    session = _new_session(_FakeUdpSocket([]))
+    with pytest.raises(SessionError):
+        session.send_bye()

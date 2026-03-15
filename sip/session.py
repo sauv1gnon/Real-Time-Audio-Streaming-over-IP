@@ -6,11 +6,12 @@ and exposes the high-level methods that the application layer calls.
 
 from __future__ import annotations
 
+import re
 import socket
 from enum import Enum, auto
 from typing import Optional
 
-from core.exceptions import SessionError, SipParseError
+from core.exceptions import SdpError, SessionError, SipParseError
 from core.log import get_logger
 from net.udp import UdpSocketAdapter
 from sip import messages as m
@@ -18,6 +19,8 @@ from sip import parser as p
 from sip.sdp import SdpDescription
 
 logger = get_logger("sip.session")
+
+_TO_TAG_RE = re.compile(r"^[A-Za-z0-9\-_.!~*'()]+$")
 
 
 # ---------------------------------------------------------------------------
@@ -135,6 +138,17 @@ class CallerSession:
             logger.warning("Unexpected status code %d — ignoring", msg.status_code)
             return False
 
+        if msg.get_header("Call-ID") != self.call_id:
+            logger.error("Call-ID mismatch in 200 OK")
+            self.state = CallerState.TERMINATED
+            return False
+
+        cseq = msg.get_header("CSeq").strip()
+        if cseq != "1 INVITE":
+            logger.error("Unexpected CSeq in 200 OK: %s", cseq)
+            self.state = CallerState.TERMINATED
+            return False
+
         # Extract To-tag for subsequent requests
         to_header = msg.get_header("To").strip()
         if not to_header:
@@ -149,7 +163,7 @@ class CallerSession:
                 to_tag = value.strip()
                 break
 
-        if not to_tag:
+        if not to_tag or not _TO_TAG_RE.match(to_tag):
             logger.error("Received 200 OK without valid To-tag")
             self.state = CallerState.TERMINATED
             return False
@@ -168,7 +182,7 @@ class CallerSession:
                     self.remote_sdp.clock_rate,
                     self.remote_sdp.payload_type,
                 )
-            except Exception as exc:
+            except (SdpError, ValueError) as exc:
                 logger.error("Failed to parse remote SDP: %s", exc)
 
         # Send ACK
@@ -189,7 +203,9 @@ class CallerSession:
     def send_bye(self) -> None:
         """Send a BYE to terminate the call."""
         if self.state not in (CallerState.ESTABLISHED, CallerState.INVITE_SENT):
-            logger.warning("BYE requested in unexpected state %s — sending anyway", self.state)
+            raise SessionError(f"Cannot send BYE in state {self.state}")
+        if not self.call_id or not self.from_tag:
+            raise SessionError("Cannot send BYE without active dialog identifiers")
         bye = m.build_bye(
             caller_ip=self.local_ip,
             caller_sip_port=self.local_sip_port,
@@ -203,19 +219,25 @@ class CallerSession:
         self.state = CallerState.TERMINATING
         logger.info("[TERMINATING] BYE sent")
 
-    def receive_bye_ok(self) -> None:
+    def receive_bye_ok(self) -> bool:
         """Wait for 200 OK to BYE and transition to TERMINATED."""
+        if self.state != CallerState.TERMINATING:
+            raise SessionError(f"Not waiting for BYE response in state {self.state}")
         try:
             raw, _ = self._sock.recv(4096)
             msg = p.parse(raw)
             if isinstance(msg, m.SipResponse) and msg.status_code == 200:
                 logger.info("[TERMINATING] Received 200 OK to BYE")
+                self.state = CallerState.TERMINATED
+                logger.info("[TERMINATED]")
+                return True
         except socket.timeout:
             logger.warning("Timeout waiting for 200 OK to BYE — assuming terminated")
-        except SipParseError:
-            pass
+        except SipParseError as exc:
+            logger.warning("Failed to parse BYE response: %s", exc)
         self.state = CallerState.TERMINATED
         logger.info("[TERMINATED]")
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -298,7 +320,7 @@ class CalleeSession:
                     self.remote_sdp.clock_rate,
                     self.remote_sdp.payload_type,
                 )
-            except Exception as exc:
+            except (SdpError, ValueError) as exc:
                 logger.error("Failed to parse offered SDP: %s", exc)
 
         return True
@@ -343,9 +365,10 @@ class CalleeSession:
         logger.info("[ESTABLISHED] ACK received — session up")
         return True
 
-    def wait_for_bye(self) -> bool:
+    def wait_for_bye(self, max_parse_errors: int = 100) -> bool:
         """Block until a BYE is received, then send 200 OK."""
         logger.info("[ESTABLISHED] Waiting for BYE…")
+        parse_errors = 0
         while True:
             try:
                 raw, _ = self._sock.recv(4096)
@@ -355,7 +378,13 @@ class CalleeSession:
 
             try:
                 msg = p.parse(raw)
-            except SipParseError:
+                parse_errors = 0
+            except SipParseError as exc:
+                parse_errors += 1
+                if parse_errors > max_parse_errors:
+                    logger.error("Too many invalid SIP packets while waiting for BYE: %d", parse_errors)
+                    return False
+                logger.debug("Ignoring malformed SIP while waiting for BYE: %s", exc)
                 continue
 
             if isinstance(msg, m.SipRequest) and msg.method == "BYE":

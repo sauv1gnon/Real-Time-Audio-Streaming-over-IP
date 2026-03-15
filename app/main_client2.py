@@ -16,6 +16,7 @@ from app import config as cfg
 from core.log import get_logger
 from media.playback import AudioPlaybackSink
 from net.udp import UdpSocketAdapter
+from rtp.jitter_buffer import JitterBuffer
 from rtp.receiver import RtpReceiver
 from sip.sdp import SdpDescription
 from sip.session import CalleeSession
@@ -80,6 +81,7 @@ def run() -> None:
     receiver = RtpReceiver(
         sock=rtp_sock,
         payload_type=cfg.PAYLOAD_TYPE,
+        jitter_buffer=JitterBuffer(max_depth=5),
     )
 
     sink = AudioPlaybackSink(

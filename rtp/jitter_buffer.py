@@ -55,8 +55,7 @@ class JitterBuffer:
             return []  # duplicate
 
         self._buffer[seq] = payload
-        # Sort by sequence number (handle 16-bit wrap-around naively)
-        self._buffer = OrderedDict(sorted(self._buffer.items(), key=lambda x: x[0]))
+        self._sort_by_modular_distance()
 
         # Force flush if buffer depth exceeded
         if len(self._buffer) >= self._max_depth:
@@ -82,9 +81,20 @@ class JitterBuffer:
 
     def _flush_all(self) -> list[bytes]:
         """Pop everything in sequence-number order."""
+        self._sort_by_modular_distance()
         out = list(self._buffer.values())
         if out and self._buffer:
             last_seq = next(reversed(self._buffer))
             self._next_seq = (last_seq + 1) & 0xFFFF
         self._buffer.clear()
         return out
+
+    def _sort_by_modular_distance(self) -> None:
+        if self._next_seq is None or not self._buffer:
+            return
+        self._buffer = OrderedDict(
+            sorted(
+                self._buffer.items(),
+                key=lambda item: ((item[0] - self._next_seq) & 0xFFFF),
+            )
+        )

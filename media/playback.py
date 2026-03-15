@@ -64,7 +64,7 @@ class AudioPlaybackSink:
         self.output_path = Path(output_path) if output_path else None
 
         self._sd = _try_import_sounddevice()
-        self._queue: queue.Queue[bytes] = queue.Queue()
+        self._queue: queue.Queue[bytes | None] = queue.Queue()
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._wav_out: Optional[wave.Wave_write] = None
@@ -90,8 +90,12 @@ class AudioPlaybackSink:
     def stop(self) -> None:
         """Stop playback and close the output WAV file."""
         self._stop_event.set()
+        # Unblock queue.get() quickly so the thread can drain and exit cleanly.
+        self._queue.put_nowait(None)
         if self._thread is not None:
             self._thread.join(timeout=3.0)
+            if self._thread.is_alive():
+                logger.warning("Playback thread did not exit before timeout")
         if self._wav_out is not None:
             self._wav_out.close()
             self._wav_out = None
@@ -116,9 +120,17 @@ class AudioPlaybackSink:
             except queue.Empty:
                 continue
 
+            if frame is None:
+                break
+
             # Write to WAV file
             if self._wav_out is not None:
-                self._wav_out.writeframes(frame)
+                try:
+                    self._wav_out.writeframes(frame)
+                except OSError as exc:
+                    logger.error("WAV write failed: %s", exc)
+                    self._stop_event.set()
+                    break
 
             # Live playback
             if self._sd is not None and np is not None:

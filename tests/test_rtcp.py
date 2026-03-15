@@ -1,8 +1,9 @@
 """Tests for the RTCP Sender Report packet."""
 
 import struct
+import time
 import pytest
-from rtp.rtcp import RtcpPacket, _SR_SIZE, _RTCP_SR_PT
+from rtp.rtcp import RtcpPacket, RtcpReporter, _SR_SIZE, _RTCP_SR_PT
 
 
 class TestRtcpPacketSerialize:
@@ -105,3 +106,51 @@ class TestRtcpRoundTrip:
         assert parsed.rtp_timestamp == original.rtp_timestamp
         assert parsed.packet_count == original.packet_count
         assert parsed.octet_count == original.octet_count
+
+
+class _DummyRtcpSocket:
+    def __init__(self):
+        self.sent = 0
+
+    def send(self, *_args, **_kwargs):
+        self.sent += 1
+
+
+def test_reporter_skips_invalid_stats():
+    sock = _DummyRtcpSocket()
+    reporter = RtcpReporter(
+        sock=sock,
+        remote_ip="127.0.0.1",
+        remote_port=5005,
+        ssrc=123,
+        interval_s=0.05,
+        get_stats=lambda: (-1, 100, 10),
+    )
+
+    reporter.start()
+    time.sleep(0.15)
+    reporter.stop()
+
+    assert sock.sent == 0
+
+
+def test_reporter_handles_stats_callback_exception():
+    sock = _DummyRtcpSocket()
+
+    def _boom():
+        raise RuntimeError("bad callback")
+
+    reporter = RtcpReporter(
+        sock=sock,
+        remote_ip="127.0.0.1",
+        remote_port=5005,
+        ssrc=123,
+        interval_s=0.05,
+        get_stats=_boom,
+    )
+
+    reporter.start()
+    time.sleep(0.15)
+    reporter.stop()
+
+    assert sock.sent == 0

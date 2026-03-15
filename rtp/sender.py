@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import random
+import threading
 from typing import Iterator
 
 from core.log import get_logger
@@ -61,6 +62,8 @@ class RtpSender:
         self._timestamp: int = random.randint(0, 0xFFFFFFFF)
         self._packets_sent: int = 0
         self._bytes_sent: int = 0
+        self._send_errors: int = 0
+        self._stats_lock = threading.Lock()
 
     # ---------------------------------------------------------------------------
     # Public interface
@@ -68,15 +71,28 @@ class RtpSender:
 
     @property
     def packets_sent(self) -> int:
-        return self._packets_sent
+        with self._stats_lock:
+            return self._packets_sent
 
     @property
     def bytes_sent(self) -> int:
-        return self._bytes_sent
+        with self._stats_lock:
+            return self._bytes_sent
 
     @property
     def current_timestamp(self) -> int:
-        return self._timestamp
+        with self._stats_lock:
+            return self._timestamp
+
+    @property
+    def send_errors(self) -> int:
+        with self._stats_lock:
+            return self._send_errors
+
+    def get_stats_snapshot(self) -> tuple[int, int, int]:
+        """Return a consistent (packets, octets, current_timestamp) snapshot."""
+        with self._stats_lock:
+            return self._packets_sent, self._bytes_sent, self._timestamp
 
     def send_frames(self, frames: Iterator[bytes], stop_event=None) -> None:
         """Send each frame in *frames* as one RTP packet, paced in real time.
@@ -105,12 +121,19 @@ class RtpSender:
             data = pkt.serialize()
 
             sleep_until(next_send_ms)
-            self._sock.send(data, self.remote_ip, self.remote_port)
+            try:
+                self._sock.send(data, self.remote_ip, self.remote_port)
+            except OSError as exc:
+                with self._stats_lock:
+                    self._send_errors += 1
+                logger.error("RTP send failed to %s:%d: %s", self.remote_ip, self.remote_port, exc)
+                break
 
             self._seq = (self._seq + 1) & 0xFFFF
-            self._timestamp = (self._timestamp + self.samples_per_frame) & 0xFFFFFFFF
-            self._packets_sent += 1
-            self._bytes_sent += len(frame)
+            with self._stats_lock:
+                self._timestamp = (self._timestamp + self.samples_per_frame) & 0xFFFFFFFF
+                self._packets_sent += 1
+                self._bytes_sent += len(frame)
             next_send_ms += self.frame_duration_ms
 
             logger.debug(
@@ -118,11 +141,12 @@ class RtpSender:
                 pkt.sequence_number,
                 pkt.timestamp,
                 len(frame),
-                self._packets_sent,
+                self.packets_sent,
             )
 
         logger.info(
-            "RTP sender done: %d packets / %d bytes sent",
-            self._packets_sent,
-            self._bytes_sent,
+            "RTP sender done: %d packets / %d bytes sent (send_errors=%d)",
+            self.packets_sent,
+            self.bytes_sent,
+            self.send_errors,
         )

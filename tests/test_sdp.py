@@ -86,6 +86,25 @@ class TestSdpParse:
         with pytest.raises(SdpError):
             SdpDescription.parse(bad_sdp)
 
+    def test_invalid_connection_ip_raises(self):
+        bad_sdp = "v=0\r\nc=IN IP4 not-an-ip\r\n"
+        with pytest.raises(SdpError, match="Invalid IPv4"):
+            SdpDescription.parse(bad_sdp)
+
+    def test_missing_payload_type_raises(self):
+        bad_sdp = "v=0\r\nm=audio 10000 RTP/AVP\r\n"
+        with pytest.raises(SdpError, match="Malformed m="):
+            SdpDescription.parse(bad_sdp)
+
+    def test_invalid_rtpmap_rate_raises(self):
+        bad_sdp = (
+            "v=0\r\n"
+            "m=audio 10000 RTP/AVP 96\r\n"
+            "a=rtpmap:96 L16/notanumber\r\n"
+        )
+        with pytest.raises(SdpError, match="Invalid codec rate"):
+            SdpDescription.parse(bad_sdp)
+
 
 class TestSdpRoundTrip:
     def test_build_then_parse(self):

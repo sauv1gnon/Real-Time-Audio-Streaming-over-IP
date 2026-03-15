@@ -108,11 +108,7 @@ def run() -> None:
         remote_port=rtp_dest_port + 1,  # RTCP = RTP + 1
         ssrc=sender.ssrc,
         interval_s=cfg.RTCP_INTERVAL_S,
-        get_stats=lambda: (
-            sender.packets_sent,
-            sender.bytes_sent,
-            sender.current_timestamp,
-        ),
+        get_stats=sender.get_stats_snapshot,
     )
     reporter.start()
 
