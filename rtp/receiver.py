@@ -14,6 +14,8 @@ from rtp.packet import RtpPacket
 
 logger = get_logger("rtp.receiver")
 
+_MAX_RTP_RECV_BYTES = 65535
+
 
 class RtpReceiver:
     """Receives RTP packets on a UDP socket and places payloads in a queue.
@@ -69,6 +71,8 @@ class RtpReceiver:
         self._stop_event.set()
         if self._thread is not None:
             self._thread.join(timeout=3.0)
+            if self._thread.is_alive():
+                logger.warning("RTP receiver thread did not exit before timeout")
         logger.info(
             "RTP receiver stopped: %d packets / %d bytes received",
             self._packets_received,
@@ -120,7 +124,7 @@ class RtpReceiver:
     def _receive_loop(self) -> None:
         while not self._stop_event.is_set():
             try:
-                data, _ = self._sock.recv(8192)
+                data, _ = self._sock.recv(_MAX_RTP_RECV_BYTES)
             except socket.timeout:
                 continue
             except OSError as exc:

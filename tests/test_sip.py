@@ -82,6 +82,10 @@ class TestBuildInvite:
         assert req.body == sdp
         assert req.get_header("Content-Type") == "application/sdp"
 
+    def test_custom_cseq(self):
+        req, _, _ = build_invite("127.0.0.1", 5060, "127.0.0.1", 5061, "v=0\r\n", cseq=7)
+        assert req.get_header("CSeq") == "7 INVITE"
+
 
 class TestBuild200Ok:
     def _make_invite(self):
@@ -114,6 +118,10 @@ class TestBuildAck:
         assert ack.method == "ACK"
         assert "call1" in ack.get_header("Call-ID")
         assert "1 ACK" in ack.get_header("CSeq")
+
+    def test_ack_custom_cseq(self):
+        ack = build_ack("127.0.0.1", 5060, "127.0.0.1", 5061, "call1", "ftag", "ttag", cseq=3)
+        assert "3 ACK" in ack.get_header("CSeq")
 
 
 class TestBuildBye:

@@ -71,3 +71,17 @@ def test_sounddevice_without_numpy_still_writes_wav(monkeypatch, tmp_path: Path)
 
     assert output_path.exists()
     assert output_path.stat().st_size > 44
+
+
+def test_small_playback_queue_drops_frames_without_crashing(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(playback, "_try_import_sounddevice", lambda: None)
+
+    output_path = tmp_path / "small_queue.wav"
+    sink = playback.AudioPlaybackSink(output_path=output_path, queue_maxsize=1)
+    sink.start()
+    for _ in range(20):
+        sink.push(b"\x00\x01" * 160)
+    sink.stop()
+
+    assert output_path.exists()
+    assert output_path.stat().st_size > 44

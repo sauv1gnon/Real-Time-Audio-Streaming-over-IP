@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 import socket
+import time
 from enum import Enum, auto
 from typing import Optional
 
@@ -88,6 +89,7 @@ class CallerSession:
         self.from_tag: str = ""
         self.to_tag: str = ""
         self.remote_sdp: Optional[SdpDescription] = None
+        self._invite_cseq: int = 1
 
     def send_invite(self) -> None:
         """Build and send the SIP INVITE.  Transitions to INVITE_SENT."""
@@ -99,6 +101,7 @@ class CallerSession:
             callee_ip=self.remote_ip,
             callee_sip_port=self.remote_sip_port,
             sdp_body=self.local_sdp.build(),
+            cseq=self._invite_cseq,
         )
         data = req.serialize()
         self._sock.send(data, self.remote_ip, self.remote_sip_port)
@@ -144,7 +147,18 @@ class CallerSession:
             return False
 
         cseq = msg.get_header("CSeq").strip()
-        if cseq != "1 INVITE":
+        cseq_parts = cseq.split()
+        if len(cseq_parts) != 2:
+            logger.error("Malformed CSeq in 200 OK: %s", cseq)
+            self.state = CallerState.TERMINATED
+            return False
+        try:
+            cseq_num = int(cseq_parts[0])
+        except ValueError:
+            logger.error("Non-integer CSeq in 200 OK: %s", cseq)
+            self.state = CallerState.TERMINATED
+            return False
+        if cseq_num != self._invite_cseq or cseq_parts[1].upper() != "INVITE":
             logger.error("Unexpected CSeq in 200 OK: %s", cseq)
             self.state = CallerState.TERMINATED
             return False
@@ -170,20 +184,31 @@ class CallerSession:
 
         self.to_tag = to_tag
 
-        # Parse remote SDP
-        if msg.body:
-            try:
-                self.remote_sdp = SdpDescription.parse(msg.body)
-                logger.info(
-                    "Remote SDP: ip=%s rtp_port=%d codec=%s/%d pt=%d",
-                    self.remote_sdp.media_ip,
-                    self.remote_sdp.rtp_port,
-                    self.remote_sdp.codec_name,
-                    self.remote_sdp.clock_rate,
-                    self.remote_sdp.payload_type,
-                )
-            except (SdpError, ValueError) as exc:
-                logger.error("Failed to parse remote SDP: %s", exc)
+        content_type = msg.get_header("Content-Type").strip().lower()
+        if content_type != "application/sdp":
+            logger.error("Expected application/sdp in 200 OK, got %r", content_type)
+            self.state = CallerState.TERMINATED
+            return False
+
+        if not msg.body:
+            logger.error("Received 200 OK without SDP body")
+            self.state = CallerState.TERMINATED
+            return False
+
+        try:
+            self.remote_sdp = SdpDescription.parse(msg.body)
+            logger.info(
+                "Remote SDP: ip=%s rtp_port=%d codec=%s/%d pt=%d",
+                self.remote_sdp.media_ip,
+                self.remote_sdp.rtp_port,
+                self.remote_sdp.codec_name,
+                self.remote_sdp.clock_rate,
+                self.remote_sdp.payload_type,
+            )
+        except (SdpError, ValueError) as exc:
+            logger.error("Failed to parse remote SDP: %s", exc)
+            self.state = CallerState.TERMINATED
+            return False
 
         # Send ACK
         ack = m.build_ack(
@@ -194,6 +219,7 @@ class CallerSession:
             call_id=self.call_id,
             from_tag=self.from_tag,
             to_tag=self.to_tag,
+            cseq=self._invite_cseq,
         )
         self._sock.send(ack.serialize(), self.remote_ip, self.remote_sip_port)
         self.state = CallerState.ESTABLISHED
@@ -214,6 +240,7 @@ class CallerSession:
             call_id=self.call_id,
             from_tag=self.from_tag,
             to_tag=self.to_tag,
+            cseq=self._invite_cseq + 1,
         )
         self._sock.send(bye.serialize(), self.remote_ip, self.remote_sip_port)
         self.state = CallerState.TERMINATING
@@ -305,23 +332,40 @@ class CalleeSession:
         self.remote_ip = addr
         self.remote_sip_port = port
         self._last_invite = msg
+        content_type = msg.get_header("Content-Type").strip().lower()
+        if content_type != "application/sdp":
+            logger.error("Expected application/sdp in INVITE, got %r", content_type)
+            error = m.build_error_response(msg, 415, "Unsupported Media Type")
+            self._sock.send(error.serialize(), self.remote_ip, self.remote_sip_port)
+            self.state = CalleeState.TERMINATED
+            return False
+
+        if not msg.body:
+            logger.error("Received INVITE without SDP body")
+            error = m.build_error_response(msg, 400, "Bad Request")
+            self._sock.send(error.serialize(), self.remote_ip, self.remote_sip_port)
+            self.state = CalleeState.TERMINATED
+            return False
+
+        try:
+            self.remote_sdp = SdpDescription.parse(msg.body)
+            logger.info(
+                "Offered SDP: ip=%s rtp_port=%d codec=%s/%d pt=%d",
+                self.remote_sdp.media_ip,
+                self.remote_sdp.rtp_port,
+                self.remote_sdp.codec_name,
+                self.remote_sdp.clock_rate,
+                self.remote_sdp.payload_type,
+            )
+        except (SdpError, ValueError) as exc:
+            logger.error("Failed to parse offered SDP: %s", exc)
+            error = m.build_error_response(msg, 488, "Not Acceptable Here")
+            self._sock.send(error.serialize(), self.remote_ip, self.remote_sip_port)
+            self.state = CalleeState.TERMINATED
+            return False
+
         self.state = CalleeState.INVITE_RECEIVED
         logger.info("[INVITE_RECEIVED] From %s:%d  call-id=%s", addr, port, msg.get_header("Call-ID"))
-
-        # Parse offered SDP
-        if msg.body:
-            try:
-                self.remote_sdp = SdpDescription.parse(msg.body)
-                logger.info(
-                    "Offered SDP: ip=%s rtp_port=%d codec=%s/%d pt=%d",
-                    self.remote_sdp.media_ip,
-                    self.remote_sdp.rtp_port,
-                    self.remote_sdp.codec_name,
-                    self.remote_sdp.clock_rate,
-                    self.remote_sdp.payload_type,
-                )
-            except (SdpError, ValueError) as exc:
-                logger.error("Failed to parse offered SDP: %s", exc)
 
         return True
 
@@ -365,11 +409,23 @@ class CalleeSession:
         logger.info("[ESTABLISHED] ACK received — session up")
         return True
 
-    def wait_for_bye(self, max_parse_errors: int = 100) -> bool:
+    def wait_for_bye(
+        self,
+        max_parse_errors: int = 100,
+        max_unexpected_messages: int = 100,
+        max_wait_s: float = 30.0,
+    ) -> bool:
         """Block until a BYE is received, then send 200 OK."""
+        if self.state != CalleeState.ESTABLISHED:
+            raise SessionError(f"Cannot wait for BYE in state {self.state}")
         logger.info("[ESTABLISHED] Waiting for BYE…")
+        deadline = time.monotonic() + max_wait_s
         parse_errors = 0
+        unexpected_messages = 0
         while True:
+            if time.monotonic() > deadline:
+                logger.warning("Timed out waiting for BYE after %.1f seconds", max_wait_s)
+                return False
             try:
                 raw, _ = self._sock.recv(4096)
             except socket.timeout:
@@ -397,4 +453,11 @@ class CalleeSession:
                 return True
 
             # Unexpected message — log and ignore
+            unexpected_messages += 1
+            if unexpected_messages > max_unexpected_messages:
+                logger.error(
+                    "Too many unexpected SIP messages while waiting for BYE: %d",
+                    unexpected_messages,
+                )
+                return False
             logger.debug("Ignoring unexpected message: %s", raw[:80])

@@ -9,6 +9,7 @@ from core.exceptions import SipParseError
 from sip.messages import SipRequest, SipResponse, SipMessage
 
 _MAX_SIP_BODY_SIZE = 64 * 1024
+_ALLOWED_METHODS = {"INVITE", "ACK", "BYE", "CANCEL", "OPTIONS"}
 
 
 def parse(raw: bytes) -> SipMessage:
@@ -18,8 +19,8 @@ def parse(raw: bytes) -> SipMessage:
     structurally invalid.
     """
     try:
-        text = raw.decode("utf-8", errors="replace")
-    except Exception as exc:
+        text = raw.decode("utf-8", errors="strict")
+    except UnicodeDecodeError as exc:
         raise SipParseError(f"Cannot decode SIP bytes: {exc}") from exc
 
     # Split header section from body on double CRLF
@@ -62,14 +63,17 @@ def parse(raw: bytes) -> SipMessage:
         method, request_uri, version = parts
         if version != "SIP/2.0":
             raise SipParseError(f"Unsupported SIP version: {version!r}")
-        msg = SipRequest(method.upper(), request_uri)
+        method = method.upper()
+        if method not in _ALLOWED_METHODS:
+            raise SipParseError(f"Unsupported SIP method: {method!r}")
+        msg = SipRequest(method, request_uri)
 
     # Parse headers
     for line in lines[1:]:
         if not line.strip():
             continue
         if ":" not in line:
-            continue
+            raise SipParseError(f"Malformed header line: {line!r}")
         name, _, value = line.partition(":")
         msg.set_header(name.strip(), value.strip())
 
@@ -88,6 +92,8 @@ def parse(raw: bytes) -> SipMessage:
         raise SipParseError(f"Content-Length out of range: {cl}")
     if cl > len(body):
         raise SipParseError(f"Content-Length exceeds available body bytes: {cl} > {len(body)}")
+    if cl < len(body):
+        raise SipParseError(f"Content-Length smaller than body bytes: {cl} < {len(body)}")
     msg.body = body[:cl]
 
     return msg

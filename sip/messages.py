@@ -22,6 +22,11 @@ class SipMessage:
         self.body: str = ""
 
     def set_header(self, name: str, value: str) -> None:
+        lower = name.lower()
+        for key in self.headers:
+            if key.lower() == lower:
+                self.headers[key] = value
+                return
         self.headers[name] = value
 
     def get_header(self, name: str, default: str = "") -> str:
@@ -96,6 +101,7 @@ def build_invite(
     callee_ip: str,
     callee_sip_port: int,
     sdp_body: str,
+    cseq: int = 1,
     call_id: Optional[str] = None,
     from_tag: Optional[str] = None,
     branch: Optional[str] = None,
@@ -115,7 +121,7 @@ def build_invite(
     req.set_header("From", f"<sip:client1@{caller_ip}:{caller_sip_port}>;tag={from_tag}")
     req.set_header("To", f"<sip:client2@{callee_ip}:{callee_sip_port}>")
     req.set_header("Call-ID", call_id)
-    req.set_header("CSeq", "1 INVITE")
+    req.set_header("CSeq", f"{cseq} INVITE")
     req.set_header("Contact", f"<sip:client1@{caller_ip}:{caller_sip_port}>")
     req.set_header("Content-Type", "application/sdp")
     req.body = sdp_body
@@ -154,6 +160,7 @@ def build_ack(
     call_id: str,
     from_tag: str,
     to_tag: str,
+    cseq: int = 1,
 ) -> SipRequest:
     """Build a SIP ACK request."""
     branch = _new_branch()
@@ -163,7 +170,7 @@ def build_ack(
     req.set_header("From", f"<sip:client1@{caller_ip}:{caller_sip_port}>;tag={from_tag}")
     req.set_header("To", f"<sip:client2@{callee_ip}:{callee_sip_port}>;tag={to_tag}")
     req.set_header("Call-ID", call_id)
-    req.set_header("CSeq", "1 ACK")
+    req.set_header("CSeq", f"{cseq} ACK")
     req.set_header("Content-Length", "0")
     return req
 

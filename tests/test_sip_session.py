@@ -5,16 +5,18 @@ from __future__ import annotations
 import socket
 import pytest
 
-from sip.messages import SipRequest, SipResponse
+from sip.messages import SipRequest, SipResponse, build_invite
 from sip.parser import parse
 from sip.sdp import SdpDescription
-from sip.session import CallerSession, CallerState
+from sip.session import CallerSession, CallerState, CalleeSession, CalleeState
 from core.exceptions import SessionError
 
 
 class _FakeUdpSocket:
-    def __init__(self, responses: list[bytes]) -> None:
+    def __init__(self, responses: list[bytes], addr: str = "127.0.0.1", port: int = 5061) -> None:
         self._responses = list(responses)
+        self._addr = addr
+        self._port = port
         self.sent: list[tuple[bytes, str, int]] = []
 
     def send(self, data: bytes, remote_ip: str, remote_port: int) -> None:
@@ -23,7 +25,7 @@ class _FakeUdpSocket:
     def recv(self, buf_size: int = 4096) -> tuple[bytes, tuple[str, int]]:
         if not self._responses:
             raise socket.timeout()
-        return self._responses.pop(0), ("127.0.0.1", 5061)
+        return self._responses.pop(0), (self._addr, self._port)
 
 
 def _offer_sdp() -> SdpDescription:
@@ -36,14 +38,33 @@ def _offer_sdp() -> SdpDescription:
     )
 
 
-def _build_200_ok(to_header: str, call_id: str) -> bytes:
+def _valid_sdp() -> str:
+    return (
+        "v=0\r\n"
+        "o=- 12345 1 IN IP4 127.0.0.1\r\n"
+        "s=Session\r\n"
+        "c=IN IP4 127.0.0.1\r\n"
+        "t=0 0\r\n"
+        "m=audio 10002 RTP/AVP 96\r\n"
+        "a=rtpmap:96 L16/8000\r\n"
+    )
+
+
+def _build_200_ok(
+    to_header: str,
+    call_id: str,
+    cseq: str = "1 INVITE",
+    content_type: str = "application/sdp",
+    body: str | None = None,
+) -> bytes:
     resp = SipResponse(200, "OK")
     resp.set_header("Via", "SIP/2.0/UDP 127.0.0.1:5060;branch=z9hG4bKtest")
     resp.set_header("From", "<sip:client1@127.0.0.1:5060>;tag=fromtag")
     resp.set_header("To", to_header)
     resp.set_header("Call-ID", call_id)
-    resp.set_header("CSeq", "1 INVITE")
-    resp.set_header("Content-Length", "0")
+    resp.set_header("CSeq", cseq)
+    resp.set_header("Content-Type", content_type)
+    resp.body = _valid_sdp() if body is None else body
     return resp.serialize()
 
 
@@ -108,7 +129,97 @@ def test_receive_200_ok_call_id_mismatch_fails():
     assert session.state == CallerState.TERMINATED
 
 
+def test_receive_200_ok_malformed_remote_sdp_fails():
+    fake_sock = _FakeUdpSocket([])
+    session = _new_session(fake_sock)
+    session.send_invite()
+    fake_sock._responses = [
+        _build_200_ok(
+            "<sip:client2@127.0.0.1:5061>;tag=ok",
+            session.call_id,
+            body="v=0\r\nm=audio\r\n",
+        )
+    ]
+
+    assert session.receive_200_ok() is False
+    assert session.state == CallerState.TERMINATED
+
+
+def test_receive_200_ok_without_sdp_body_fails():
+    fake_sock = _FakeUdpSocket([])
+    session = _new_session(fake_sock)
+    session.send_invite()
+    fake_sock._responses = [
+        _build_200_ok(
+            "<sip:client2@127.0.0.1:5061>;tag=ok",
+            session.call_id,
+            body="",
+        )
+    ]
+
+    assert session.receive_200_ok() is False
+    assert session.state == CallerState.TERMINATED
+
+
+def test_receive_200_ok_wrong_content_type_fails():
+    fake_sock = _FakeUdpSocket([])
+    session = _new_session(fake_sock)
+    session.send_invite()
+    fake_sock._responses = [
+        _build_200_ok(
+            "<sip:client2@127.0.0.1:5061>;tag=ok",
+            session.call_id,
+            content_type="text/plain",
+            body="hello",
+        )
+    ]
+
+    assert session.receive_200_ok() is False
+    assert session.state == CallerState.TERMINATED
+
+
+def test_receive_200_ok_cseq_mismatch_fails():
+    fake_sock = _FakeUdpSocket([])
+    session = _new_session(fake_sock)
+    session.send_invite()
+    fake_sock._responses = [
+        _build_200_ok(
+            "<sip:client2@127.0.0.1:5061>;tag=ok",
+            session.call_id,
+            cseq="2 INVITE",
+        )
+    ]
+
+    assert session.receive_200_ok() is False
+    assert session.state == CallerState.TERMINATED
+
+
 def test_send_bye_invalid_state_raises():
     session = _new_session(_FakeUdpSocket([]))
     with pytest.raises(SessionError):
         session.send_bye()
+
+
+def test_callee_wait_for_invite_with_malformed_sdp_sends_488():
+    bad_invite, _, _ = build_invite(
+        caller_ip="127.0.0.1",
+        caller_sip_port=5060,
+        callee_ip="127.0.0.1",
+        callee_sip_port=5061,
+        sdp_body="v=0\r\nm=audio\r\n",
+    )
+    fake_sock = _FakeUdpSocket([bad_invite.serialize()], addr="127.0.0.1", port=5060)
+    session = CalleeSession(
+        sock=fake_sock,
+        local_ip="127.0.0.1",
+        local_sip_port=5061,
+        local_sdp=_offer_sdp(),
+    )
+
+    assert session.wait_for_invite() is False
+    assert session.state == CalleeState.TERMINATED
+    assert len(fake_sock.sent) == 1
+
+    err = parse(fake_sock.sent[0][0])
+    assert isinstance(err, SipResponse)
+    assert err.status_code == 488

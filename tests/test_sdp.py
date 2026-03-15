@@ -105,6 +105,30 @@ class TestSdpParse:
         with pytest.raises(SdpError, match="Invalid codec rate"):
             SdpDescription.parse(bad_sdp)
 
+    def test_malformed_origin_line_raises(self):
+        bad_sdp = (
+            "v=0\r\n"
+            "o=- 12345\r\n"
+            "s=Test Session\r\n"
+            "c=IN IP4 127.0.0.1\r\n"
+            "m=audio 10000 RTP/AVP 96\r\n"
+            "a=rtpmap:96 L16/8000\r\n"
+        )
+        with pytest.raises(SdpError, match="Malformed o="):
+            SdpDescription.parse(bad_sdp)
+
+    def test_payload_type_mismatch_between_m_and_rtpmap_raises(self):
+        bad_sdp = (
+            "v=0\r\n"
+            "o=- 12345 1 IN IP4 127.0.0.1\r\n"
+            "s=Test Session\r\n"
+            "c=IN IP4 127.0.0.1\r\n"
+            "m=audio 10000 RTP/AVP 96\r\n"
+            "a=rtpmap:97 L16/8000\r\n"
+        )
+        with pytest.raises(SdpError, match="Payload type mismatch"):
+            SdpDescription.parse(bad_sdp)
+
 
 class TestSdpRoundTrip:
     def test_build_then_parse(self):

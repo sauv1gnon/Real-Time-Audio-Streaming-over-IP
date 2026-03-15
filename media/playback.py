@@ -57,17 +57,20 @@ class AudioPlaybackSink:
         channels: int = 1,
         sample_width: int = 2,
         output_path: Optional[str | Path] = None,
+        queue_maxsize: int = 500,
     ) -> None:
         self.sample_rate = sample_rate
         self.channels = channels
         self.sample_width = sample_width
         self.output_path = Path(output_path) if output_path else None
+        self.queue_maxsize = queue_maxsize
 
         self._sd = _try_import_sounddevice()
-        self._queue: queue.Queue[bytes | None] = queue.Queue()
+        self._queue: queue.Queue[bytes | None] = queue.Queue(maxsize=queue_maxsize)
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._wav_out: Optional[wave.Wave_write] = None
+        self._frames_dropped: int = 0
 
     def start(self) -> None:
         """Open output file (if any) and start the playback thread."""
@@ -91,7 +94,14 @@ class AudioPlaybackSink:
         """Stop playback and close the output WAV file."""
         self._stop_event.set()
         # Unblock queue.get() quickly so the thread can drain and exit cleanly.
-        self._queue.put_nowait(None)
+        try:
+            self._queue.put_nowait(None)
+        except queue.Full:
+            try:
+                self._queue.get_nowait()
+            except queue.Empty:
+                pass
+            self._queue.put_nowait(None)
         if self._thread is not None:
             self._thread.join(timeout=3.0)
             if self._thread.is_alive():
@@ -103,7 +113,21 @@ class AudioPlaybackSink:
 
     def push(self, frame: bytes) -> None:
         """Enqueue a raw PCM frame for playback/writing."""
-        self._queue.put_nowait(frame)
+        try:
+            self._queue.put_nowait(frame)
+        except queue.Full:
+            # Keep latency bounded by dropping oldest queued frame.
+            try:
+                self._queue.get_nowait()
+            except queue.Empty:
+                pass
+            try:
+                self._queue.put_nowait(frame)
+            except queue.Full:
+                # If contention keeps the queue full, drop this frame.
+                pass
+            self._frames_dropped += 1
+            logger.warning("Playback queue full — dropping oldest frame")
 
     # ------------------------------------------------------------------
     # Internal

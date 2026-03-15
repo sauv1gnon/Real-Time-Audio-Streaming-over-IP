@@ -49,6 +49,7 @@ class RtpSender:
         ssrc: int | None = None,
         samples_per_frame: int = _SAMPLES_PER_FRAME,
         frame_duration_ms: float = _FRAME_DURATION_MS,
+        max_send_errors: int = 10,
     ) -> None:
         self._sock = sock
         self.remote_ip = remote_ip
@@ -57,6 +58,7 @@ class RtpSender:
         self.ssrc = ssrc if ssrc is not None else random.getrandbits(32)
         self.samples_per_frame = samples_per_frame
         self.frame_duration_ms = frame_duration_ms
+        self.max_send_errors = max_send_errors
 
         self._seq: int = random.randint(0, 65535)
         self._timestamp: int = random.randint(0, 0xFFFFFFFF)
@@ -126,8 +128,27 @@ class RtpSender:
             except OSError as exc:
                 with self._stats_lock:
                     self._send_errors += 1
-                logger.error("RTP send failed to %s:%d: %s", self.remote_ip, self.remote_port, exc)
-                break
+                    send_errors = self._send_errors
+                if send_errors >= self.max_send_errors:
+                    logger.error(
+                        "RTP send failed to %s:%d (%d/%d): %s — stopping sender",
+                        self.remote_ip,
+                        self.remote_port,
+                        send_errors,
+                        self.max_send_errors,
+                        exc,
+                    )
+                    break
+                logger.warning(
+                    "RTP send failed to %s:%d (%d/%d): %s — continuing",
+                    self.remote_ip,
+                    self.remote_port,
+                    send_errors,
+                    self.max_send_errors,
+                    exc,
+                )
+                next_send_ms += self.frame_duration_ms
+                continue
 
             self._seq = (self._seq + 1) & 0xFFFF
             with self._stats_lock:

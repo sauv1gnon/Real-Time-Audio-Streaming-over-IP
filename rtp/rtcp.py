@@ -160,6 +160,8 @@ class RtcpReporter:
         self._stop_event.set()
         if self._thread is not None:
             self._thread.join(timeout=self.interval_s + 1.0)
+            if self._thread.is_alive():
+                logger.warning("RTCP reporter thread did not exit before timeout")
         logger.info("RTCP reporter stopped — %d SR(s) sent", self._reports_sent)
 
     def _report_loop(self) -> None:
