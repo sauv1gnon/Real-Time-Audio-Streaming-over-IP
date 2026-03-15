@@ -69,6 +69,24 @@ class TestRtcpPacketParse:
         with pytest.raises(ValueError):
             RtcpPacket.parse(b"\x80\xc8\x00")
 
+    def test_parse_wrong_version_raises(self):
+        raw = bytearray(self._build_raw())
+        raw[0] = 0x40
+        with pytest.raises(ValueError, match="version"):
+            RtcpPacket.parse(bytes(raw))
+
+    def test_parse_wrong_packet_type_raises(self):
+        raw = bytearray(self._build_raw())
+        raw[1] = 201
+        with pytest.raises(ValueError, match="packet type"):
+            RtcpPacket.parse(bytes(raw))
+
+    def test_parse_wrong_length_field_raises(self):
+        raw = bytearray(self._build_raw())
+        struct.pack_into("!H", raw, 2, 0)
+        with pytest.raises(ValueError, match="length"):
+            RtcpPacket.parse(bytes(raw))
+
 
 class TestRtcpRoundTrip:
     def test_serialize_then_parse(self):

@@ -83,6 +83,16 @@ class RtcpPacket:
         b0, pt, _length, ssrc, ntp_hi, ntp_lo, rtp_ts, pkt_cnt, oct_cnt = struct.unpack_from(
             _SR_FMT, data
         )
+        version = (b0 >> 6) & 0x03
+        if version != 2:
+            raise ValueError(f"Invalid RTCP version {version}; expected 2")
+        if pt != _RTCP_SR_PT:
+            raise ValueError(f"Unsupported RTCP packet type {pt}; expected {_RTCP_SR_PT}")
+        expected_length_words = (_SR_SIZE // 4) - 1
+        if _length != expected_length_words:
+            raise ValueError(
+                f"Invalid RTCP SR length field {_length}; expected {expected_length_words}"
+            )
         return cls(
             ssrc=ssrc,
             ntp_timestamp_hi=ntp_hi,
