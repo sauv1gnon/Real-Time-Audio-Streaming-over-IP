@@ -48,6 +48,7 @@ class RtpReceiver:
         self._queue: queue.Queue[bytes] = queue.Queue(maxsize=queue_maxsize)
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
+        self._stats_lock = threading.Lock()
         self._packets_received: int = 0
         self._bytes_received: int = 0
         self._frames_dropped: int = 0
@@ -61,6 +62,9 @@ class RtpReceiver:
 
     def start(self) -> None:
         """Start the background receiver thread."""
+        if self._thread is not None and self._thread.is_alive():
+            logger.warning("RTP receiver already running")
+            return
         self._stop_event.clear()
         self._thread = threading.Thread(target=self._receive_loop, daemon=True, name="rtp-recv")
         self._thread.start()
@@ -73,10 +77,15 @@ class RtpReceiver:
             self._thread.join(timeout=3.0)
             if self._thread.is_alive():
                 logger.warning("RTP receiver thread did not exit before timeout")
+            else:
+                self._thread = None
+        with self._stats_lock:
+            packets_received = self._packets_received
+            bytes_received = self._bytes_received
         logger.info(
             "RTP receiver stopped: %d packets / %d bytes received",
-            self._packets_received,
-            self._bytes_received,
+            packets_received,
+            bytes_received,
         )
 
     # ---------------------------------------------------------------------------
@@ -85,27 +94,33 @@ class RtpReceiver:
 
     @property
     def packets_received(self) -> int:
-        return self._packets_received
+        with self._stats_lock:
+            return self._packets_received
 
     @property
     def bytes_received(self) -> int:
-        return self._bytes_received
+        with self._stats_lock:
+            return self._bytes_received
 
     @property
     def frames_dropped(self) -> int:
-        return self._frames_dropped
+        with self._stats_lock:
+            return self._frames_dropped
 
     @property
     def receive_errors(self) -> int:
-        return self._receive_errors
+        with self._stats_lock:
+            return self._receive_errors
 
     @property
     def ssrc_drops(self) -> int:
-        return self._ssrc_drops
+        with self._stats_lock:
+            return self._ssrc_drops
 
     @property
     def last_error(self) -> str | None:
-        return self._last_error
+        with self._stats_lock:
+            return self._last_error
 
     def get_frame(self, timeout: float = 1.0) -> bytes | None:
         """Pop the next frame payload from the queue.
@@ -130,8 +145,9 @@ class RtpReceiver:
             except OSError as exc:
                 if self._stop_event.is_set():
                     break
-                self._receive_errors += 1
-                self._last_error = str(exc)
+                with self._stats_lock:
+                    self._receive_errors += 1
+                    self._last_error = str(exc)
                 logger.error("RTP receiver socket error: %s", exc)
                 break
 
@@ -148,7 +164,8 @@ class RtpReceiver:
             if self.expected_ssrc is None:
                 self.expected_ssrc = pkt.ssrc
             elif pkt.ssrc != self.expected_ssrc:
-                self._ssrc_drops += 1
+                with self._stats_lock:
+                    self._ssrc_drops += 1
                 logger.warning(
                     "Dropping packet from unexpected SSRC=0x%08X (expected 0x%08X)",
                     pkt.ssrc,
@@ -156,8 +173,9 @@ class RtpReceiver:
                 )
                 continue
 
-            self._packets_received += 1
-            self._bytes_received += len(pkt.payload)
+            with self._stats_lock:
+                self._packets_received += 1
+                self._bytes_received += len(pkt.payload)
 
             logger.debug(
                 "RTP recv  seq=%d  ts=%d  bytes=%d",
@@ -174,7 +192,8 @@ class RtpReceiver:
                 try:
                     self._queue.put_nowait(payload)
                 except queue.Full:
-                    self._frames_dropped += 1
+                    with self._stats_lock:
+                        self._frames_dropped += 1
                     logger.warning(
                         "RTP receiver queue full — dropping frame seq=%d",
                         pkt.sequence_number,
@@ -185,5 +204,6 @@ class RtpReceiver:
                 try:
                     self._queue.put_nowait(payload)
                 except queue.Full:
-                    self._frames_dropped += 1
+                    with self._stats_lock:
+                        self._frames_dropped += 1
                     logger.warning("RTP receiver queue full — dropping flushed frame")

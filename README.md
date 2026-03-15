@@ -238,7 +238,7 @@ pip install pytest
 python -m pytest tests/ -v
 ```
 
-Expected output: **107 tests, all passing**.
+Expected output: **128 tests, all passing**.
 
 Test coverage includes:
 

@@ -101,13 +101,19 @@ class AudioPlaybackSink:
                 self._queue.get_nowait()
             except queue.Empty:
                 pass
-            self._queue.put_nowait(None)
+            try:
+                self._queue.put_nowait(None)
+            except queue.Full:
+                logger.warning("Playback queue remained full while stopping")
         if self._thread is not None:
             self._thread.join(timeout=3.0)
             if self._thread.is_alive():
                 logger.warning("Playback thread did not exit before timeout")
         if self._wav_out is not None:
-            self._wav_out.close()
+            try:
+                self._wav_out.close()
+            except Exception as exc:
+                logger.warning("Failed to close WAV output cleanly: %s", exc)
             self._wav_out = None
         logger.info("Playback sink stopped")
 

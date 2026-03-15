@@ -66,6 +66,9 @@ class SdpDescription:
     def parse(cls, sdp_text: str) -> "SdpDescription":
         """Parse an SDP string and return an :class:`SdpDescription`."""
         desc = cls()
+        saw_connection = False
+        saw_media = False
+        saw_rtpmap = False
         media_payload_type: int | None = None
         rtpmap_payload_type: int | None = None
         for line in sdp_text.splitlines():
@@ -91,6 +94,7 @@ class SdpDescription:
                 desc.session_name = value
 
             elif key == "c":
+                saw_connection = True
                 parts = value.split()
                 if len(parts) < 3:
                     raise SdpError(f"Malformed c= line: {line!r}")
@@ -103,6 +107,7 @@ class SdpDescription:
                 desc.media_ip = parts[2]
 
             elif key == "m":
+                saw_media = True
                 parts = value.split()
                 if len(parts) < 4:
                     raise SdpError(f"Malformed m= line: {line!r}")
@@ -126,6 +131,7 @@ class SdpDescription:
 
             elif key == "a":
                 if value.startswith("rtpmap:"):
+                    saw_rtpmap = True
                     rest = value[len("rtpmap:"):]
                     pt_str, _, codec_info = rest.partition(" ")
                     try:
@@ -158,5 +164,12 @@ class SdpDescription:
                 "Payload type mismatch between m= and a=rtpmap: "
                 f"{media_payload_type} != {rtpmap_payload_type}"
             )
+
+        if not saw_connection:
+            raise SdpError("Missing required c= connection line")
+        if not saw_media:
+            raise SdpError("Missing required m= media line")
+        if not saw_rtpmap:
+            raise SdpError("Missing required a=rtpmap attribute")
 
         return desc

@@ -68,6 +68,16 @@ def _build_200_ok(
     return resp.serialize()
 
 
+def _build_100_trying(call_id: str, cseq: str = "1 INVITE") -> bytes:
+    resp = SipResponse(100, "Trying")
+    resp.set_header("Via", "SIP/2.0/UDP 127.0.0.1:5060;branch=z9hG4bKtest")
+    resp.set_header("From", "<sip:client1@127.0.0.1:5060>;tag=fromtag")
+    resp.set_header("To", "<sip:client2@127.0.0.1:5061>")
+    resp.set_header("Call-ID", call_id)
+    resp.set_header("CSeq", cseq)
+    return resp.serialize()
+
+
 def _new_session(fake_sock: _FakeUdpSocket) -> CallerSession:
     return CallerSession(
         sock=fake_sock,
@@ -194,8 +204,30 @@ def test_receive_200_ok_cseq_mismatch_fails():
     assert session.state == CallerState.TERMINATED
 
 
+def test_receive_200_ok_after_provisional_response_succeeds():
+    to_tag = "dialog123"
+    fake_sock = _FakeUdpSocket([])
+    session = _new_session(fake_sock)
+    session.send_invite()
+    fake_sock._responses = [
+        _build_100_trying(session.call_id),
+        _build_200_ok(f"<sip:client2@127.0.0.1:5061>;tag={to_tag}", session.call_id),
+    ]
+
+    assert session.receive_200_ok() is True
+    assert session.state == CallerState.ESTABLISHED
+    assert session.to_tag == to_tag
+
+
 def test_send_bye_invalid_state_raises():
     session = _new_session(_FakeUdpSocket([]))
+    with pytest.raises(SessionError):
+        session.send_bye()
+
+
+def test_send_bye_in_invite_sent_state_raises():
+    session = _new_session(_FakeUdpSocket([]))
+    session.send_invite()
     with pytest.raises(SessionError):
         session.send_bye()
 
@@ -223,3 +255,52 @@ def test_callee_wait_for_invite_with_malformed_sdp_sends_488():
     err = parse(fake_sock.sent[0][0])
     assert isinstance(err, SipResponse)
     assert err.status_code == 488
+
+
+def test_callee_wait_for_invite_ignores_unexpected_request_then_accepts_invite():
+    noise = SipRequest("OPTIONS", "sip:client2@127.0.0.1:5061")
+    noise.set_header("Call-ID", "noise")
+    invite, _, _ = build_invite(
+        caller_ip="127.0.0.1",
+        caller_sip_port=5060,
+        callee_ip="127.0.0.1",
+        callee_sip_port=5061,
+        sdp_body=_valid_sdp(),
+    )
+    fake_sock = _FakeUdpSocket([noise.serialize(), invite.serialize()], addr="127.0.0.1", port=5060)
+    session = CalleeSession(
+        sock=fake_sock,
+        local_ip="127.0.0.1",
+        local_sip_port=5061,
+        local_sdp=_offer_sdp(),
+    )
+
+    assert session.wait_for_invite() is True
+    assert session.state == CalleeState.INVITE_RECEIVED
+
+
+def test_callee_wait_for_ack_ignores_unexpected_request_then_accepts_ack():
+    fake_sock = _FakeUdpSocket([])
+    session = _new_session(fake_sock)
+    session.send_invite()
+    fake_sock._responses = [_build_200_ok("<sip:client2@127.0.0.1:5061>;tag=dialog", session.call_id)]
+    assert session.receive_200_ok() is True
+
+    bye = SipRequest("BYE", "sip:client2@127.0.0.1:5061")
+    bye.set_header("Call-ID", session.call_id)
+    bye.set_header("CSeq", "2 BYE")
+    ack = SipRequest("ACK", "sip:client2@127.0.0.1:5061")
+    ack.set_header("Call-ID", session.call_id)
+    ack.set_header("CSeq", "1 ACK")
+
+    callee_sock = _FakeUdpSocket([bye.serialize(), ack.serialize()], addr="127.0.0.1", port=5060)
+    callee = CalleeSession(
+        sock=callee_sock,
+        local_ip="127.0.0.1",
+        local_sip_port=5061,
+        local_sdp=_offer_sdp(),
+    )
+    callee.state = CalleeState.OK_SENT
+
+    assert callee.wait_for_ack() is True
+    assert callee.state == CalleeState.ESTABLISHED

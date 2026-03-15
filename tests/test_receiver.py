@@ -59,3 +59,16 @@ def test_receiver_records_socket_errors():
 
     assert receiver.receive_errors == 1
     assert receiver.last_error is not None
+
+
+def test_receiver_start_stop_is_idempotent():
+    sock = _FakeRecvSocket([_rtp(0x11111111, 1)])
+    receiver = RtpReceiver(sock=sock, payload_type=96)
+
+    receiver.start()
+    receiver.start()
+    time.sleep(0.05)
+    receiver.stop()
+    receiver.stop()
+
+    assert receiver.packets_received >= 1
