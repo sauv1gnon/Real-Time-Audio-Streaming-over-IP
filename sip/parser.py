@@ -39,7 +39,6 @@ def parse(raw: bytes) -> SipMessage:
 
     msg: SipMessage
     if start_line.startswith("SIP/2.0"):
-        # Response
         parts = start_line.split(" ", 2)
         if len(parts) != 3:
             raise SipParseError(f"Malformed response start line: {start_line!r}")
@@ -55,7 +54,6 @@ def parse(raw: bytes) -> SipMessage:
         reason = parts[2]
         msg = SipResponse(status_code, reason)
     else:
-        # Request
         parts = start_line.split(" ", 2)
         if len(parts) != 3:
             raise SipParseError(f"Malformed request start line: {start_line!r}")

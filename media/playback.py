@@ -97,7 +97,6 @@ class AudioPlaybackSink:
     def stop(self) -> None:
         """Stop playback and close the output WAV file."""
         self._stop_event.set()
-        # Unblock queue.get() quickly so the thread can drain and exit cleanly.
         try:
             self._queue.put_nowait(None)
         except queue.Full:
@@ -126,7 +125,6 @@ class AudioPlaybackSink:
         try:
             self._queue.put_nowait(frame)
         except queue.Full:
-            # Keep latency bounded by dropping oldest queued frame.
             try:
                 self._queue.get_nowait()
             except queue.Empty:
@@ -134,14 +132,9 @@ class AudioPlaybackSink:
             try:
                 self._queue.put_nowait(frame)
             except queue.Full:
-                # If contention keeps the queue full, drop this frame.
                 pass
             self._frames_dropped += 1
             logger.warning("Playback queue full — dropping oldest frame")
-
-    # ------------------------------------------------------------------
-    # Internal
-    # ------------------------------------------------------------------
 
     def _playback_loop(self) -> None:
         np = _try_import_numpy() if self._sd is not None else None
@@ -157,7 +150,6 @@ class AudioPlaybackSink:
             if frame is None:
                 break
 
-            # Write to WAV file
             if self._wav_out is not None:
                 try:
                     self._wav_out.writeframes(frame)
@@ -166,7 +158,6 @@ class AudioPlaybackSink:
                     self._stop_event.set()
                     break
 
-            # Live playback
             if self._sd is not None and np is not None:
                 try:
                     audio = np.frombuffer(frame, dtype=np.int16)

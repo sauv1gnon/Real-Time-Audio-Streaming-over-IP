@@ -17,7 +17,6 @@ from core.exceptions import SdpError
 class SdpDescription:
     """Holds the SDP fields needed to set up an RTP media session."""
 
-    # Connection / origin
     origin_username: str = "-"
     session_id: str = "0"
     session_version: str = "0"
@@ -25,22 +24,15 @@ class SdpDescription:
     addr_type: str = "IP4"
     unicast_addr: str = "127.0.0.1"
 
-    # Session
     session_name: str = "VoIP Demo"
 
-    # Media
     media_ip: str = "127.0.0.1"
     rtp_port: int = 10000
     payload_type: int = 96          # Dynamic PT for raw PCM
     codec_name: str = "L16"         # Linear 16-bit PCM
     clock_rate: int = 8000
 
-    # Extra attributes (stored as list of "key:value" or plain "key" strings)
     extra_attrs: list[str] = field(default_factory=list)
-
-    # ---------------------------------------------------------------------------
-    # Builder
-    # ---------------------------------------------------------------------------
 
     def build(self) -> str:
         """Serialise to an SDP string (CRLF-terminated lines)."""
@@ -57,10 +49,6 @@ class SdpDescription:
         for attr in self.extra_attrs:
             lines.append(f"a={attr}")
         return "\r\n".join(lines) + "\r\n"
-
-    # ---------------------------------------------------------------------------
-    # Parser
-    # ---------------------------------------------------------------------------
 
     @classmethod
     def parse(cls, sdp_text: str) -> "SdpDescription":

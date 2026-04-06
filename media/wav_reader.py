@@ -103,7 +103,6 @@ class WavAudioSource:
                 data = wf.readframes(self._samples_per_frame)
                 if not data:
                     break
-                # Pad last frame if needed
                 if len(data) < self._bytes_per_frame:
                     data = data + b"\x00" * (self._bytes_per_frame - len(data))
                 yield data

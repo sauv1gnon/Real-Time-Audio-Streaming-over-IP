@@ -44,9 +44,6 @@ def run() -> None:
     logger.info("  Two-way mode: %s", cfg.TWO_WAY_CALL)
     logger.info("  RTP packet loss (sender): %.2f", cfg.PACKET_LOSS)
 
-    # -----------------------------------------------------------------------
-    # Build local audio source (WAV or microphone)
-    # -----------------------------------------------------------------------
     if cfg.AUDIO_SOURCE == "mic":
         source = MicrophoneAudioSource(
             sample_rate=cfg.SAMPLE_RATE,
@@ -59,9 +56,6 @@ def run() -> None:
         source = WavAudioSource(wav_path, frame_duration_ms=cfg.FRAME_DURATION_MS)
     source.open()
 
-    # -----------------------------------------------------------------------
-    # Build caller SDP offer
-    # -----------------------------------------------------------------------
     offer_sdp = SdpDescription(
         unicast_addr=cfg.CLIENT1_IP,
         media_ip=cfg.CLIENT1_IP,
@@ -71,9 +65,6 @@ def run() -> None:
         clock_rate=cfg.SAMPLE_RATE,
     )
 
-    # -----------------------------------------------------------------------
-    # SIP handshake
-    # -----------------------------------------------------------------------
     sip_sock: UdpSocketAdapter | None = None
     rtp_sock: UdpSocketAdapter | None = None
     rtcp_sock: UdpSocketAdapter | None = None
@@ -103,7 +94,6 @@ def run() -> None:
             return
         call_established = True
 
-        # Determine the remote RTP endpoint from the SDP answer
         rtp_dest_ip = cfg.CLIENT2_IP
         rtp_dest_port = cfg.CLIENT2_RTP_PORT
         if session.remote_sdp is not None:
@@ -112,9 +102,6 @@ def run() -> None:
 
         logger.info("Call established — streaming to %s:%d", rtp_dest_ip, rtp_dest_port)
 
-        # -----------------------------------------------------------------------
-        # RTP sender + RTCP reporter
-        # -----------------------------------------------------------------------
         rtp_sock = UdpSocketAdapter(cfg.CLIENT1_IP, cfg.CLIENT1_RTP_PORT)
         rtp_sock.open()
         rtcp_sock = UdpSocketAdapter(cfg.CLIENT1_IP, cfg.CLIENT1_RTCP_PORT)

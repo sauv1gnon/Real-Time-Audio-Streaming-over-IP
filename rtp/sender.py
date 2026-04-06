@@ -14,7 +14,6 @@ from rtp.packet import RtpPacket
 
 logger = get_logger("rtp.sender")
 
-# Samples per frame for 8 kHz / 20 ms
 _SAMPLES_PER_FRAME = 160
 _FRAME_DURATION_MS = 20.0
 
@@ -75,10 +74,6 @@ class RtpSender:
         self._simulated_drops: int = 0
         self._random_value = random_func if random_func is not None else random.random
         self._stats_lock = threading.Lock()
-
-    # ---------------------------------------------------------------------------
-    # Public interface
-    # ---------------------------------------------------------------------------
 
     @property
     def packets_sent(self) -> int:

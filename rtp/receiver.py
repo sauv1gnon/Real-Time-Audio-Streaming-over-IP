@@ -60,10 +60,6 @@ class RtpReceiver:
         self._expected_playout_seq: int | None = None
         self._concealment_frame_size: int | None = None
 
-    # ---------------------------------------------------------------------------
-    # Control
-    # ---------------------------------------------------------------------------
-
     def start(self) -> None:
         """Start the background receiver thread."""
         if self._thread is not None and self._thread.is_alive():
@@ -91,10 +87,6 @@ class RtpReceiver:
             packets_received,
             bytes_received,
         )
-
-    # ---------------------------------------------------------------------------
-    # Data access
-    # ---------------------------------------------------------------------------
 
     @property
     def packets_received(self) -> int:
@@ -145,10 +137,6 @@ class RtpReceiver:
             return self._queue.get(timeout=timeout)
         except queue.Empty:
             return None
-
-    # ---------------------------------------------------------------------------
-    # Internal
-    # ---------------------------------------------------------------------------
 
     def _queue_payload(self, payload: bytes, seq: int, *, concealment: bool = False) -> None:
         try:

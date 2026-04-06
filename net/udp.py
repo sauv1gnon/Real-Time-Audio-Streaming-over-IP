@@ -34,7 +34,6 @@ class UdpSocketAdapter:
             self._sock.settimeout(self._timeout)
             self._sock.bind((self.local_ip, self.local_port))
         except OSError as exc:
-            # Avoid leaking a partially initialized socket when bind/setup fails.
             try:
                 self._sock.close()
             except OSError:

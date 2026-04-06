@@ -20,17 +20,15 @@ A Python-based two-endpoint VoIP demo that implements:
 5. [Running on a LAN](#running-on-a-lan)
 6. [Architecture overview](#architecture-overview)
 7. [Protocol flow](#protocol-flow)
-8. [Tests](#tests)
-9. [Implemented features](#implemented-features)
-10. [Sample outputs](#sample-outputs)
+8. [Implemented features](#implemented-features)
+9. [Sample outputs](#sample-outputs)
 
 ---
 
 ## Requirements
 
 - Python 3.10 or later (tested on 3.12)
-- `pytest` for tests: `pip install pytest`
-- **Optional** - microphone capture and live playback: `pip install sounddevice numpy`
+- microphone capture and live playback: `pip install sounddevice numpy`
 
 No other third-party packages are required; all protocol logic uses the Python standard library.
 
@@ -67,17 +65,8 @@ project/
 ├─ net/
 │  ├─ udp.py             # Blocking UDP socket adapter
 │  └─ endpoints.py       # EndpointConfig dataclass
-├─ tests/
-│  ├─ test_sip.py        # SIP message builder tests
-│  ├─ test_sip_parser.py # SIP parser tests
-│  ├─ test_sdp.py        # SDP builder / parser tests
-│  ├─ test_rtp.py        # RTP packet tests
-│  ├─ test_rtcp.py       # RTCP packet tests
-│  └─ test_integration.py# End-to-end SIP + RTP + RTCP tests
 ├─ assets/
 │  └─ sample.wav         # 3 s mono 8 kHz 16-bit PCM sine wave
-├─ conftest.py           # Pytest path setup
-├─ pytest.ini            # Pytest configuration
 └─ README.md
 ```
 
@@ -103,7 +92,7 @@ The app loads `.env` automatically if it exists.
 ### 3 - Start Client 2 (callee/receiver) first
 
 ```bash
-python -m app.main_client2
+$env:ENV_FILE='.env.client2'; python -m app.main_client2
 ```
 
 Client 2 binds `127.0.0.1:5061` (SIP) and `127.0.0.1:10002` (RTP) and waits
@@ -112,7 +101,7 @@ for an INVITE.
 ### 4 - Start Client 1 (caller/sender) in a second terminal
 
 ```bash
-python -m app.main_client1
+$env:ENV_FILE='.env.client1'; python -m app.main_client1
 ```
 
 Client 1 sends a SIP INVITE, completes the handshake, streams
@@ -181,7 +170,7 @@ $env:ENV_FILE = ".env.client1"
 python -m app.main_client1
 ```
 
-### Bonus mode: microphone and two-way call
+### Microphone and two-way call
 
 Install optional audio dependencies:
 
@@ -308,29 +297,6 @@ Client 1 ──BYE──► Client 2
 
 ---
 
-## Tests
-
-```bash
-pip install pytest
-python -m pytest tests/ -v
-```
-
-Expected output: **132 tests, all passing**.
-
-Test coverage includes:
-
-- SIP message builder (all required headers, bodies, and round-trips)
-- SIP parser (valid messages, malformed inputs, error cases)
-- SDP builder and parser (all required fields, error cases, round-trips)
-- RTP packet encode / decode (all header fields, marker bit, wrap-around)
-- RTCP Sender Report encode / decode
-- End-to-end SIP handshake (in-process threads, localhost)
-- End-to-end RTP send + receive (in-process, localhost)
-- RTCP reporter sends periodic SRs
-- WAV reader validates PCM format and produces correct frame sizes
-
----
-
 ## Implemented features
 
 - [x] SIP INVITE with SDP body
@@ -350,7 +316,6 @@ Test coverage includes:
 - [x] Configurable ports and IPs via environment variables
 - [x] Jitter buffer for mild out-of-order delivery
 - [x] Codec adapter hook for future G.711 support
-- [x] 132 passing unit and integration tests
 
 ---
 

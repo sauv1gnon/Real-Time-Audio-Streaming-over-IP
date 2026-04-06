@@ -45,10 +45,6 @@ class RtpPacket:
     padding: bool = False
     extension: bool = False
 
-    # ---------------------------------------------------------------------------
-    # Serialisation
-    # ---------------------------------------------------------------------------
-
     def serialize(self) -> bytes:
         """Pack the fixed header fields and payload into bytes."""
         # Byte 0: V(2) P(1) X(1) CC(4)
@@ -60,10 +56,6 @@ class RtpPacket:
         ssrc = self.ssrc & 0xFFFFFFFF
         header = struct.pack(_HEADER_FMT, b0, b1, seq, ts, ssrc)
         return header + self.payload
-
-    # ---------------------------------------------------------------------------
-    # Parsing
-    # ---------------------------------------------------------------------------
 
     @classmethod
     def parse(cls, data: bytes) -> "RtpPacket":

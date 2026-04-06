@@ -23,11 +23,6 @@ logger = get_logger("sip.session")
 
 _TO_TAG_RE = re.compile(r"^[A-Za-z0-9\-_.!~*'()]+$")
 
-
-# ---------------------------------------------------------------------------
-# State enumerations
-# ---------------------------------------------------------------------------
-
 class CallerState(Enum):
     IDLE = auto()
     INVITE_SENT = auto()
@@ -43,11 +38,6 @@ class CalleeState(Enum):
     ESTABLISHED = auto()
     TERMINATING = auto()
     TERMINATED = auto()
-
-
-# ---------------------------------------------------------------------------
-# Caller session
-# ---------------------------------------------------------------------------
 
 class CallerSession:
     """Manages the caller side of a SIP dialog.
@@ -202,7 +192,6 @@ class CallerSession:
                 self.state = CallerState.TERMINATED
                 return False
 
-            # Extract To-tag for subsequent requests
             to_header = msg.get_header("To").strip()
             if not to_header:
                 logger.error("Received 200 OK without To header")
@@ -249,7 +238,6 @@ class CallerSession:
                 self.state = CallerState.TERMINATED
                 return False
 
-            # Send ACK
             ack = m.build_ack(
                 caller_ip=self.local_ip,
                 caller_sip_port=self.local_sip_port,
@@ -304,11 +292,6 @@ class CallerSession:
         self.state = CallerState.TERMINATED
         logger.info("[TERMINATED]")
         return False
-
-
-# ---------------------------------------------------------------------------
-# Callee session
-# ---------------------------------------------------------------------------
 
 class CalleeSession:
     """Manages the callee side of a SIP dialog.
@@ -527,7 +510,6 @@ class CalleeSession:
             try:
                 raw, _ = self._sock.recv(4096)
             except socket.timeout:
-                # Keep looping — BYE may arrive late
                 continue
 
             try:
@@ -550,7 +532,6 @@ class CalleeSession:
                 logger.info("[TERMINATED]")
                 return True
 
-            # Unexpected message — log and ignore
             unexpected_messages += 1
             if unexpected_messages > max_unexpected_messages:
                 logger.error(

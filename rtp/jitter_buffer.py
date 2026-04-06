@@ -61,7 +61,6 @@ class JitterBuffer:
         self._buffer[seq] = payload
         self._sort_by_modular_distance()
 
-        # Force flush if buffer depth exceeded
         if len(self._buffer) >= self._max_depth:
             return self._flush_all_with_sequence()
 
@@ -74,10 +73,6 @@ class JitterBuffer:
     def flush_with_sequence(self) -> list[tuple[int, bytes]]:
         """Flush all remaining frames with sequence numbers."""
         return self._flush_all_with_sequence()
-
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
 
     def _drain(self) -> list[bytes]:
         return [frame for _, frame in self._drain_with_sequence()]

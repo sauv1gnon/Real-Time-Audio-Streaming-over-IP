@@ -37,9 +37,6 @@ def run() -> None:
     logger.info("  Two-way mode: %s", cfg.TWO_WAY_CALL)
     logger.info("  RTP packet loss (sender): %.2f", cfg.PACKET_LOSS)
 
-    # -----------------------------------------------------------------------
-    # Build callee SDP answer
-    # -----------------------------------------------------------------------
     answer_sdp = SdpDescription(
         unicast_addr=cfg.CLIENT2_IP,
         media_ip=cfg.CLIENT2_IP,
@@ -49,9 +46,6 @@ def run() -> None:
         clock_rate=cfg.SAMPLE_RATE,
     )
 
-    # -----------------------------------------------------------------------
-    # SIP handshake
-    # -----------------------------------------------------------------------
     sip_sock: UdpSocketAdapter | None = None
     rtp_sock: UdpSocketAdapter | None = None
     receiver: RtpReceiver | None = None
@@ -83,7 +77,6 @@ def run() -> None:
             logger.error("No ACK received — exiting")
             return
 
-        # Determine the sender's RTP endpoint from the SDP offer
         rtp_src_ip = cfg.CLIENT1_IP
         rtp_src_port = cfg.CLIENT1_RTP_PORT
         if session.remote_sdp is not None:
@@ -92,9 +85,6 @@ def run() -> None:
 
         logger.info("Call established — receiving RTP from %s", rtp_src_ip)
 
-        # -----------------------------------------------------------------------
-        # RTP receiver + playback sink
-        # -----------------------------------------------------------------------
         rtp_sock = UdpSocketAdapter(cfg.CLIENT2_IP, cfg.CLIENT2_RTP_PORT)
         rtp_sock.open()
 
@@ -159,16 +149,11 @@ def run() -> None:
             uplink_sender_thread = threading.Thread(target=_uplink_send, daemon=True, name="uplink-send")
             uplink_sender_thread.start()
 
-        # -----------------------------------------------------------------------
-        # Wait for BYE while forwarding received frames to the playback sink
-        # -----------------------------------------------------------------------
         def _sip_bye_watcher() -> None:
             try:
-                # Poll SIP BYE in chunks and keep waiting while RTP keeps flowing.
                 poll_wait_s = max(0.5, min(cfg.SIP_TIMEOUT_S, 5.0))
                 idle_grace_s = max(10.0, cfg.SIP_TIMEOUT_S * 2.0)
 
-                # Hard safety cap in case BYE is never sent.
                 hard_deadline_s = 180.0
                 if cfg.TWO_WAY_CALL or cfg.AUDIO_SOURCE == "mic":
                     hard_deadline_s = max(hard_deadline_s, cfg.MIC_DURATION_S + 90.0)
@@ -215,7 +200,6 @@ def run() -> None:
             if frame is not None:
                 sink.push(frame)
 
-        # Drain any remaining frames
         while True:
             frame = receiver.get_frame(timeout=0.05)
             if frame is None:

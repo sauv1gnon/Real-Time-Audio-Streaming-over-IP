@@ -25,7 +25,6 @@ class SipMessage:
         self.headers[name] = value
 
     def get_header(self, name: str, default: str = "") -> str:
-        # Case-insensitive lookup
         lower = name.lower()
         for k, v in self.headers.items():
             if k.lower() == lower:
@@ -72,11 +71,6 @@ class SipResponse(SipMessage):
         start_line = f"SIP/2.0 {self.status_code} {self.reason}"
         raw = f"{start_line}\r\n{self._header_lines()}\r\n\r\n"
         return raw.encode() + body_bytes
-
-
-# ---------------------------------------------------------------------------
-# SIP builder helpers
-# ---------------------------------------------------------------------------
 
 def _new_call_id() -> str:
     return uuid.uuid4().hex
