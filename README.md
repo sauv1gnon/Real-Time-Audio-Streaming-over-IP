@@ -30,7 +30,7 @@ A Python-based two-endpoint VoIP demo that implements:
 
 - Python 3.10 or later (tested on 3.12)
 - `pytest` for tests: `pip install pytest`
-- **Optional** – live audio playback: `pip install sounddevice numpy`
+- **Optional** - microphone capture and live playback: `pip install sounddevice numpy`
 
 No other third-party packages are required; all protocol logic uses the Python standard library.
 
@@ -92,7 +92,15 @@ git clone <repo-url>
 cd Real-Time-Audio-Streaming-over-IP
 ```
 
-### 2 – Start Client 2 (callee/receiver) first
+### 2 - Create a local `.env`
+
+```powershell
+Copy-Item .env.example .env
+```
+
+The app loads `.env` automatically if it exists.
+
+### 3 - Start Client 2 (callee/receiver) first
 
 ```bash
 python -m app.main_client2
@@ -101,7 +109,7 @@ python -m app.main_client2
 Client 2 binds `127.0.0.1:5061` (SIP) and `127.0.0.1:10002` (RTP) and waits
 for an INVITE.
 
-### 3 – Start Client 1 (caller/sender) in a second terminal
+### 4 - Start Client 1 (caller/sender) in a second terminal
 
 ```bash
 python -m app.main_client1
@@ -120,8 +128,13 @@ Received audio is saved to `received_audio.wav` by Client 2.
 All settings live in `app/config.py` and can be overridden with environment
 variables:
 
+- The project includes `.env.example`, `.env.client1`, and `.env.client2`.
+- Use `ENV_FILE=<path>` to load a specific profile file.
+- If `ENV_FILE` is not set, `.env` is loaded automatically (when present).
+
 | Variable | Default | Description |
 |---|---|---|
+| `ENV_FILE` | *(unset)* | Optional path to a specific env file to load first |
 | `CLIENT1_IP` | `127.0.0.1` | Caller IP |
 | `CLIENT2_IP` | `127.0.0.1` | Callee IP |
 | `CLIENT1_SIP_PORT` | `5060` | Caller SIP port |
@@ -152,33 +165,62 @@ CLIENT2_IP=192.168.1.20 CLIENT1_IP=192.168.1.10 python -m app.main_client2
 
 Ensure that no firewall blocks UDP on ports 5060, 5061, 10000–10003.
 
+### Profile-based startup (recommended)
+
+Use the included role-specific env files:
+
+```powershell
+# Terminal 1 (callee)
+$env:ENV_FILE = ".env.client2"
+python -m app.main_client2
+
+# Terminal 2 (caller)
+$env:ENV_FILE = ".env.client1"
+python -m app.main_client1
+```
+
 ### Bonus mode: microphone and two-way call
 
 Install optional audio dependencies:
 
-```bash
+```powershell
 pip install sounddevice numpy
 ```
 
-One-way microphone (Client 1 mic -> Client 2):
+One-way microphone (Client 1 mic -> Client 2) with env files:
 
-```bash
-# Terminal 1
+```powershell
+# Terminal 1 (callee)
+$env:ENV_FILE = ".env.client2"
 python -m app.main_client2
 
-# Terminal 2
-AUDIO_SOURCE=mic MIC_DURATION_S=8 python -m app.main_client1
+# Terminal 2 (caller)
+$env:ENV_FILE = ".env.client1"
+$env:AUDIO_SOURCE = "mic"
+$env:MIC_DURATION_S = "8"
+python -m app.main_client1
 ```
 
 Two-way microphone call:
 
-```bash
-# Terminal 1
-AUDIO_SOURCE=mic TWO_WAY_CALL=true MIC_DURATION_S=8 python -m app.main_client2
+```powershell
+# Terminal 1 (callee)
+$env:ENV_FILE = ".env.client2"
+$env:AUDIO_SOURCE = "mic"
+$env:TWO_WAY_CALL = "true"
+$env:MIC_DURATION_S = "8"
+python -m app.main_client2
 
-# Terminal 2
-AUDIO_SOURCE=mic TWO_WAY_CALL=true MIC_DURATION_S=8 python -m app.main_client1
+# Terminal 2 (caller)
+$env:ENV_FILE = ".env.client1"
+$env:AUDIO_SOURCE = "mic"
+$env:TWO_WAY_CALL = "true"
+$env:MIC_DURATION_S = "8"
+python -m app.main_client1
 ```
+
+Tip: if you prefer persistent settings, edit `.env.client1` and `.env.client2`
+directly instead of overriding variables in the terminal.
 
 ---
 
@@ -271,7 +313,7 @@ pip install pytest
 python -m pytest tests/ -v
 ```
 
-Expected output: **128 tests, all passing**.
+Expected output: **132 tests, all passing**.
 
 Test coverage includes:
 
@@ -306,7 +348,7 @@ Test coverage includes:
 - [x] Configurable ports and IPs via environment variables
 - [x] Jitter buffer for mild out-of-order delivery
 - [x] Codec adapter hook for future G.711 support
-- [x] 63 passing unit and integration tests
+- [x] 132 passing unit and integration tests
 
 ---
 

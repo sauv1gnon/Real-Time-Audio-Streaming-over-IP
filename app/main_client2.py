@@ -10,6 +10,7 @@ Environment variables (see app/config.py):
 from __future__ import annotations
 
 import threading
+import time
 from pathlib import Path
 
 from app import config as cfg
@@ -161,12 +162,45 @@ def run() -> None:
         # -----------------------------------------------------------------------
         def _sip_bye_watcher() -> None:
             try:
-                bye_wait_s = 30.0
-                if cfg.TWO_WAY_CALL:
-                    # In two-way mode both sides may still be sending media
-                    # when the default SIP BYE wait would otherwise expire.
-                    bye_wait_s = max(30.0, cfg.MIC_DURATION_S + 30.0)
-                session.wait_for_bye(max_wait_s=bye_wait_s)
+                # Poll SIP BYE in chunks and keep waiting while RTP keeps flowing.
+                poll_wait_s = max(0.5, min(cfg.SIP_TIMEOUT_S, 5.0))
+                idle_grace_s = max(10.0, cfg.SIP_TIMEOUT_S * 2.0)
+
+                # Hard safety cap in case BYE is never sent.
+                hard_deadline_s = 180.0
+                if cfg.TWO_WAY_CALL or cfg.AUDIO_SOURCE == "mic":
+                    hard_deadline_s = max(hard_deadline_s, cfg.MIC_DURATION_S + 90.0)
+
+                started_at = time.monotonic()
+                last_progress_at = started_at
+                last_packets = receiver.packets_received if receiver is not None else 0
+
+                while True:
+                    if session.wait_for_bye(max_wait_s=poll_wait_s, log_timeout=False, log_waiting=False):
+                        return
+
+                    now = time.monotonic()
+                    if receiver is not None:
+                        packets_now = receiver.packets_received
+                        if packets_now > last_packets:
+                            last_packets = packets_now
+                            last_progress_at = now
+
+                    if now - last_progress_at >= idle_grace_s:
+                        logger.warning(
+                            "Timed out waiting for BYE after %.1f seconds (no SIP BYE and no RTP progress for %.1f s)",
+                            now - started_at,
+                            idle_grace_s,
+                        )
+                        return
+
+                    if now - started_at >= hard_deadline_s:
+                        logger.warning(
+                            "Timed out waiting for BYE after %.1f seconds (hard limit %.1f s)",
+                            now - started_at,
+                            hard_deadline_s,
+                        )
+                        return
             finally:
                 bye_event.set()
 

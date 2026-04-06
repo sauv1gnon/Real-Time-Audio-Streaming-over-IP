@@ -7,6 +7,51 @@ from __future__ import annotations
 
 import math
 import os
+from pathlib import Path
+
+
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _load_env_file(path: str, *, required: bool, override_existing: bool) -> None:
+	env_path = Path(path)
+	if not env_path.is_absolute():
+		env_path = _PROJECT_ROOT / env_path
+
+	if not env_path.exists():
+		if required:
+			raise ValueError(f"ENV_FILE does not exist: {env_path}")
+		return
+
+	for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+		line = raw_line.strip()
+		if not line or line.startswith("#"):
+			continue
+		if line.startswith("export "):
+			line = line[len("export "):].lstrip()
+		key, sep, value = line.partition("=")
+		if not sep:
+			continue
+		key = key.strip()
+		if not key:
+			continue
+		value = value.strip()
+		if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+			value = value[1:-1]
+		if override_existing:
+			os.environ[key] = value
+		else:
+			# Keep explicit process env vars authoritative over default .env values.
+			os.environ.setdefault(key, value)
+
+
+_env_file = os.getenv("ENV_FILE")
+if _env_file is not None and _env_file.strip() != "":
+	# Explicit profile selection should be deterministic even if the shell still
+	# has old variable values from previous runs.
+	_load_env_file(_env_file.strip(), required=True, override_existing=True)
+else:
+	_load_env_file(".env", required=False, override_existing=False)
 
 
 def _env_int(name: str, default: int, min_value: int | None = None, max_value: int | None = None) -> int:

@@ -81,6 +81,7 @@ def test_small_playback_queue_drops_frames_without_crashing(monkeypatch, tmp_pat
     sink.start()
     for _ in range(20):
         sink.push(b"\x00\x01" * 160)
+    time.sleep(0.05)
     sink.stop()
 
     assert output_path.exists()

@@ -508,17 +508,21 @@ class CalleeSession:
         max_parse_errors: int = 100,
         max_unexpected_messages: int = 100,
         max_wait_s: float = 30.0,
+        log_timeout: bool = True,
+        log_waiting: bool = True,
     ) -> bool:
         """Block until a BYE is received, then send 200 OK."""
         if self.state != CalleeState.ESTABLISHED:
             raise SessionError(f"Cannot wait for BYE in state {self.state}")
-        logger.info("[ESTABLISHED] Waiting for BYE…")
+        if log_waiting:
+            logger.info("[ESTABLISHED] Waiting for BYE…")
         deadline = time.monotonic() + max_wait_s
         parse_errors = 0
         unexpected_messages = 0
         while True:
             if time.monotonic() > deadline:
-                logger.warning("Timed out waiting for BYE after %.1f seconds", max_wait_s)
+                if log_timeout:
+                    logger.warning("Timed out waiting for BYE after %.1f seconds", max_wait_s)
                 return False
             try:
                 raw, _ = self._sock.recv(4096)

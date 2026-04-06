@@ -6,6 +6,7 @@ sounddevice + numpy.
 
 from __future__ import annotations
 
+import time
 from typing import Iterator
 
 from core.exceptions import MediaError
@@ -19,15 +20,6 @@ def _try_import_sounddevice():
         import sounddevice as sd  # type: ignore
 
         return sd
-    except Exception:
-        return None
-
-
-def _try_import_numpy():
-    try:
-        import numpy as np  # type: ignore
-
-        return np
     except Exception:
         return None
 
@@ -47,7 +39,6 @@ class MicrophoneAudioSource:
         self.frame_duration_ms = frame_duration_ms
         self.duration_s = duration_s
         self._sd = _try_import_sounddevice()
-        self._np = _try_import_numpy()
 
         self._samples_per_frame = int(self.sample_rate * self.frame_duration_ms / 1000.0)
         self._bytes_per_frame = self._samples_per_frame * self.channels * 2  # int16
@@ -66,28 +57,54 @@ class MicrophoneAudioSource:
             raise MediaError(
                 "Microphone mode requires sounddevice. Install with: pip install sounddevice"
             )
-        if self._np is None:
-            raise MediaError("Microphone mode requires numpy. Install with: pip install numpy")
         if self.channels != 1:
             raise MediaError(f"Only mono microphone capture is supported (got channels={self.channels})")
         logger.info(
-            "Microphone capture ready: %d Hz, %d ms/frame, %.1f s total",
+            "Microphone capture ready: %d Hz, %.1f ms/frame, %.1f s total",
             self.sample_rate,
             self.frame_duration_ms,
             self.duration_s,
         )
 
     def frames(self) -> Iterator[bytes]:
-        if self._sd is None or self._np is None:
-            raise MediaError("Microphone dependencies are unavailable")
+        if self._sd is None:
+            raise MediaError("Microphone dependency (sounddevice) is unavailable")
         logger.info("Recording from microphone...")
-        for _ in range(self._frame_count):
-            # Blocking capture for one frame interval.
-            chunk = self._sd.rec(
-                self._samples_per_frame,
-                samplerate=self.sample_rate,
-                channels=self.channels,
-                dtype="int16",
-                blocking=True,
-            )
-            yield chunk.tobytes()
+        started_at = time.monotonic()
+        deadline = started_at + self.duration_s
+        emitted = 0
+
+        stream = self._sd.RawInputStream(
+            samplerate=self.sample_rate,
+            channels=self.channels,
+            dtype="int16",
+            blocksize=self._samples_per_frame,
+        )
+
+        with stream:
+            while emitted < self._frame_count:
+                if time.monotonic() >= deadline:
+                    break
+
+                chunk, overflowed = stream.read(self._samples_per_frame)
+                if time.monotonic() > deadline:
+                    break
+                if overflowed:
+                    logger.warning("Microphone input overflow detected")
+
+                data = bytes(chunk)
+                if len(data) < self._bytes_per_frame:
+                    data += b"\x00" * (self._bytes_per_frame - len(data))
+                elif len(data) > self._bytes_per_frame:
+                    data = data[: self._bytes_per_frame]
+
+                emitted += 1
+                yield data
+
+        elapsed = time.monotonic() - started_at
+        logger.info(
+            "Microphone capture finished: %d frames in %.2f s (target %.2f s)",
+            emitted,
+            elapsed,
+            self.duration_s,
+        )
