@@ -160,11 +160,28 @@ class RtcpReporter:
         self._stop_event.set()
         if self._thread is not None:
             self._thread.join(timeout=self.interval_s + 1.0)
+            if self._thread.is_alive():
+                logger.warning("RTCP reporter thread did not exit before timeout")
         logger.info("RTCP reporter stopped — %d SR(s) sent", self._reports_sent)
 
     def _report_loop(self) -> None:
         while not self._stop_event.wait(timeout=self.interval_s):
-            pkt_cnt, oct_cnt, rtp_ts = self._get_stats()
+            try:
+                pkt_cnt, oct_cnt, rtp_ts = self._get_stats()
+            except Exception as exc:
+                logger.warning("RTCP stats callback failed: %s", exc)
+                continue
+
+            if not isinstance(pkt_cnt, int) or pkt_cnt < 0:
+                logger.warning("Invalid RTCP packet count from stats callback: %r", pkt_cnt)
+                continue
+            if not isinstance(oct_cnt, int) or oct_cnt < 0:
+                logger.warning("Invalid RTCP octet count from stats callback: %r", oct_cnt)
+                continue
+            if not isinstance(rtp_ts, int):
+                logger.warning("Invalid RTCP RTP timestamp from stats callback: %r", rtp_ts)
+                continue
+
             ntp_hi, ntp_lo = _ntp_now()
             sr = RtcpPacket(
                 ssrc=self.ssrc,

@@ -1,6 +1,7 @@
 """UDP socket adapter and endpoint configuration."""
 
 import socket
+from core.exceptions import NetworkError
 from core.log import get_logger
 
 logger = get_logger("net.udp")
@@ -28,9 +29,20 @@ class UdpSocketAdapter:
     def open(self) -> None:
         """Create and bind the UDP socket."""
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self._sock.settimeout(self._timeout)
-        self._sock.bind((self.local_ip, self.local_port))
+        try:
+            self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self._sock.settimeout(self._timeout)
+            self._sock.bind((self.local_ip, self.local_port))
+        except OSError as exc:
+            # Avoid leaking a partially initialized socket when bind/setup fails.
+            try:
+                self._sock.close()
+            except OSError:
+                pass
+            self._sock = None
+            raise NetworkError(
+                f"Cannot bind UDP socket {self.local_ip or '0.0.0.0'}:{self.local_port}: {exc}"
+            ) from exc
         logger.debug("Bound UDP socket %s:%d", self.local_ip or "0.0.0.0", self.local_port)
 
     def send(self, data: bytes, remote_ip: str, remote_port: int) -> None:

@@ -6,6 +6,7 @@ Only the subset required by the project is supported:
 
 from __future__ import annotations
 
+import ipaddress
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -65,6 +66,11 @@ class SdpDescription:
     def parse(cls, sdp_text: str) -> "SdpDescription":
         """Parse an SDP string and return an :class:`SdpDescription`."""
         desc = cls()
+        saw_connection = False
+        saw_media = False
+        saw_rtpmap = False
+        media_payload_type: int | None = None
+        rtpmap_payload_type: int | None = None
         for line in sdp_text.splitlines():
             line = line.strip()
             if not line or "=" not in line:
@@ -75,56 +81,95 @@ class SdpDescription:
 
             if key == "o":
                 parts = value.split()
-                if len(parts) >= 6:
-                    desc.origin_username = parts[0]
-                    desc.session_id = parts[1]
-                    desc.session_version = parts[2]
-                    desc.net_type = parts[3]
-                    desc.addr_type = parts[4]
-                    desc.unicast_addr = parts[5]
+                if len(parts) < 6:
+                    raise SdpError(f"Malformed o= line: {line!r}")
+                desc.origin_username = parts[0]
+                desc.session_id = parts[1]
+                desc.session_version = parts[2]
+                desc.net_type = parts[3]
+                desc.addr_type = parts[4]
+                desc.unicast_addr = parts[5]
 
             elif key == "s":
                 desc.session_name = value
 
             elif key == "c":
-                parts = value.split()
-                if len(parts) >= 3:
-                    desc.media_ip = parts[2]
-
-            elif key == "m":
+                saw_connection = True
                 parts = value.split()
                 if len(parts) < 3:
+                    raise SdpError(f"Malformed c= line: {line!r}")
+                if parts[0] != "IN" or parts[1] != "IP4":
+                    raise SdpError(f"Unsupported connection type in c= line: {value!r}")
+                try:
+                    ipaddress.IPv4Address(parts[2])
+                except ipaddress.AddressValueError as exc:
+                    raise SdpError(f"Invalid IPv4 address in c= line: {parts[2]!r}") from exc
+                desc.media_ip = parts[2]
+
+            elif key == "m":
+                saw_media = True
+                parts = value.split()
+                if len(parts) < 4:
                     raise SdpError(f"Malformed m= line: {line!r}")
                 if parts[0] != "audio":
                     raise SdpError(f"Unsupported media type: {parts[0]!r}")
+                if parts[2] != "RTP/AVP":
+                    raise SdpError(f"Unsupported media transport: {parts[2]!r}")
                 try:
                     desc.rtp_port = int(parts[1])
                 except ValueError as exc:
                     raise SdpError(f"Invalid RTP port: {parts[1]!r}") from exc
-                if parts:
-                    try:
-                        desc.payload_type = int(parts[3])
-                    except (IndexError, ValueError):
-                        pass  # Keep default PT
+                if not 1 <= desc.rtp_port <= 65535:
+                    raise SdpError(f"RTP port out of range: {desc.rtp_port}")
+                try:
+                    desc.payload_type = int(parts[3])
+                    media_payload_type = desc.payload_type
+                except ValueError as exc:
+                    raise SdpError(f"Invalid payload type: {parts[3]!r}") from exc
+                if not 0 <= desc.payload_type <= 127:
+                    raise SdpError(f"Payload type out of range: {desc.payload_type}")
 
             elif key == "a":
                 if value.startswith("rtpmap:"):
+                    saw_rtpmap = True
                     rest = value[len("rtpmap:"):]
                     pt_str, _, codec_info = rest.partition(" ")
                     try:
                         desc.payload_type = int(pt_str)
-                    except ValueError:
-                        pass
-                    if "/" in codec_info:
-                        codec_name, _, rate_str = codec_info.partition("/")
-                        desc.codec_name = codec_name.strip()
-                        try:
-                            desc.clock_rate = int(rate_str.strip())
-                        except ValueError:
-                            pass
-                    else:
-                        desc.codec_name = codec_info.strip()
+                        rtpmap_payload_type = desc.payload_type
+                    except ValueError as exc:
+                        raise SdpError(f"Invalid rtpmap payload type: {pt_str!r}") from exc
+                    if not codec_info or "/" not in codec_info:
+                        raise SdpError(f"Malformed rtpmap attribute: {value!r}")
+                    codec_name, _, rate_str = codec_info.partition("/")
+                    codec_name = codec_name.strip()
+                    if not codec_name:
+                        raise SdpError(f"Missing codec name in rtpmap: {value!r}")
+                    desc.codec_name = codec_name
+                    try:
+                        desc.clock_rate = int(rate_str.strip())
+                    except ValueError as exc:
+                        raise SdpError(f"Invalid codec rate in rtpmap: {value!r}") from exc
+                    if desc.clock_rate <= 0:
+                        raise SdpError(f"Clock rate must be positive: {desc.clock_rate}")
                 else:
                     desc.extra_attrs.append(value)
+
+        if (
+            media_payload_type is not None
+            and rtpmap_payload_type is not None
+            and media_payload_type != rtpmap_payload_type
+        ):
+            raise SdpError(
+                "Payload type mismatch between m= and a=rtpmap: "
+                f"{media_payload_type} != {rtpmap_payload_type}"
+            )
+
+        if not saw_connection:
+            raise SdpError("Missing required c= connection line")
+        if not saw_media:
+            raise SdpError("Missing required m= media line")
+        if not saw_rtpmap:
+            raise SdpError("Missing required a=rtpmap attribute")
 
         return desc

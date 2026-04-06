@@ -86,6 +86,85 @@ class TestSdpParse:
         with pytest.raises(SdpError):
             SdpDescription.parse(bad_sdp)
 
+    def test_invalid_connection_ip_raises(self):
+        bad_sdp = "v=0\r\nc=IN IP4 not-an-ip\r\n"
+        with pytest.raises(SdpError, match="Invalid IPv4"):
+            SdpDescription.parse(bad_sdp)
+
+    def test_missing_payload_type_raises(self):
+        bad_sdp = "v=0\r\nm=audio 10000 RTP/AVP\r\n"
+        with pytest.raises(SdpError, match="Malformed m="):
+            SdpDescription.parse(bad_sdp)
+
+    def test_invalid_rtpmap_rate_raises(self):
+        bad_sdp = (
+            "v=0\r\n"
+            "m=audio 10000 RTP/AVP 96\r\n"
+            "a=rtpmap:96 L16/notanumber\r\n"
+        )
+        with pytest.raises(SdpError, match="Invalid codec rate"):
+            SdpDescription.parse(bad_sdp)
+
+    def test_malformed_origin_line_raises(self):
+        bad_sdp = (
+            "v=0\r\n"
+            "o=- 12345\r\n"
+            "s=Test Session\r\n"
+            "c=IN IP4 127.0.0.1\r\n"
+            "m=audio 10000 RTP/AVP 96\r\n"
+            "a=rtpmap:96 L16/8000\r\n"
+        )
+        with pytest.raises(SdpError, match="Malformed o="):
+            SdpDescription.parse(bad_sdp)
+
+    def test_payload_type_mismatch_between_m_and_rtpmap_raises(self):
+        bad_sdp = (
+            "v=0\r\n"
+            "o=- 12345 1 IN IP4 127.0.0.1\r\n"
+            "s=Test Session\r\n"
+            "c=IN IP4 127.0.0.1\r\n"
+            "m=audio 10000 RTP/AVP 96\r\n"
+            "a=rtpmap:97 L16/8000\r\n"
+        )
+        with pytest.raises(SdpError, match="Payload type mismatch"):
+            SdpDescription.parse(bad_sdp)
+
+    def test_missing_connection_line_raises(self):
+        bad_sdp = (
+            "v=0\r\n"
+            "o=- 12345 1 IN IP4 127.0.0.1\r\n"
+            "s=Test Session\r\n"
+            "t=0 0\r\n"
+            "m=audio 10000 RTP/AVP 96\r\n"
+            "a=rtpmap:96 L16/8000\r\n"
+        )
+        with pytest.raises(SdpError, match="Missing required c="):
+            SdpDescription.parse(bad_sdp)
+
+    def test_missing_media_line_raises(self):
+        bad_sdp = (
+            "v=0\r\n"
+            "o=- 12345 1 IN IP4 127.0.0.1\r\n"
+            "s=Test Session\r\n"
+            "c=IN IP4 127.0.0.1\r\n"
+            "t=0 0\r\n"
+            "a=rtpmap:96 L16/8000\r\n"
+        )
+        with pytest.raises(SdpError, match="Missing required m="):
+            SdpDescription.parse(bad_sdp)
+
+    def test_missing_rtpmap_raises(self):
+        bad_sdp = (
+            "v=0\r\n"
+            "o=- 12345 1 IN IP4 127.0.0.1\r\n"
+            "s=Test Session\r\n"
+            "c=IN IP4 127.0.0.1\r\n"
+            "t=0 0\r\n"
+            "m=audio 10000 RTP/AVP 96\r\n"
+        )
+        with pytest.raises(SdpError, match="Missing required a=rtpmap"):
+            SdpDescription.parse(bad_sdp)
+
 
 class TestSdpRoundTrip:
     def test_build_then_parse(self):

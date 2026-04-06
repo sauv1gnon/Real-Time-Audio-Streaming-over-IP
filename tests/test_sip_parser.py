@@ -125,6 +125,51 @@ class TestParseErrors:
         with pytest.raises(SipParseError):
             parse(raw)
 
+    def test_rejects_non_sip2_request(self):
+        raw = b"INVITE sip:bob@127.0.0.1 SIP/1.0\r\n\r\n"
+        with pytest.raises(SipParseError, match="Unsupported SIP version"):
+            parse(raw)
+
+    def test_rejects_status_code_out_of_range(self):
+        raw = b"SIP/2.0 9999 Invalid\r\n\r\n"
+        with pytest.raises(SipParseError, match="out of range"):
+            parse(raw)
+
+    def test_rejects_negative_content_length(self):
+        raw = b"SIP/2.0 200 OK\r\nContent-Length: -1\r\n\r\n"
+        with pytest.raises(SipParseError, match="Content-Length out of range"):
+            parse(raw)
+
+    def test_rejects_content_length_larger_than_body(self):
+        raw = b"SIP/2.0 200 OK\r\nContent-Length: 10\r\n\r\nabc"
+        with pytest.raises(SipParseError, match="exceeds available body"):
+            parse(raw)
+
+    def test_rejects_content_length_smaller_than_body(self):
+        raw = b"SIP/2.0 200 OK\r\nContent-Length: 3\r\n\r\nabcdef"
+        with pytest.raises(SipParseError, match="smaller than body"):
+            parse(raw)
+
+    def test_rejects_invalid_utf8(self):
+        raw = b"INVITE sip:bob@127.0.0.1:5061 SIP/2.0\r\nCall-ID: x\r\n\r\n\xff"
+        with pytest.raises(SipParseError, match="Cannot decode SIP bytes"):
+            parse(raw)
+
+    def test_rejects_unknown_method(self):
+        raw = b"FUZZ sip:bob@127.0.0.1:5061 SIP/2.0\r\nCall-ID: x\r\n\r\n"
+        with pytest.raises(SipParseError, match="Unsupported SIP method"):
+            parse(raw)
+
+    def test_rejects_malformed_header_line(self):
+        raw = (
+            b"INVITE sip:bob@127.0.0.1:5061 SIP/2.0\r\n"
+            b"Call-ID: x\r\n"
+            b"BrokenHeaderWithoutColon\r\n"
+            b"\r\n"
+        )
+        with pytest.raises(SipParseError, match="Malformed header line"):
+            parse(raw)
+
 
 class TestRoundTrip:
     """Ensure that serialised messages can be parsed back correctly."""
