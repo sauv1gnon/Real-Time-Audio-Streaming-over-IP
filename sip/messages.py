@@ -9,11 +9,6 @@ from __future__ import annotations
 import uuid
 from typing import Optional
 
-
-# ---------------------------------------------------------------------------
-# SIP message base
-# ---------------------------------------------------------------------------
-
 class SipMessage:
     """Holds headers and an optional body for a SIP message."""
 

@@ -42,6 +42,7 @@ def run() -> None:
     else:
         logger.info("  Mic duration: %.1f s", cfg.MIC_DURATION_S)
     logger.info("  Two-way mode: %s", cfg.TWO_WAY_CALL)
+    logger.info("  RTP packet loss (sender): %.2f", cfg.PACKET_LOSS)
 
     # -----------------------------------------------------------------------
     # Build local audio source (WAV or microphone)
@@ -126,6 +127,7 @@ def run() -> None:
             payload_type=cfg.PAYLOAD_TYPE,
             samples_per_frame=source.samples_per_frame,
             frame_duration_ms=cfg.FRAME_DURATION_MS,
+            packet_loss=cfg.PACKET_LOSS,
         )
 
         stop_event = threading.Event()

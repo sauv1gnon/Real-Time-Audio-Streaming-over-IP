@@ -150,6 +150,52 @@ class TestRtpSenderTimestamp:
         assert sender.packets_sent == 0
         assert sender.bytes_sent == 0
 
+    def test_simulated_packet_loss_drops_all_frames(self):
+        sock = _DummyUdpSocket()
+        sender = RtpSender(
+            sock,
+            "127.0.0.1",
+            5004,
+            frame_duration_ms=0.0,
+            packet_loss=1.0,
+            random_func=lambda: 0.0,
+        )
+        initial_timestamp = sender.current_timestamp
+
+        sender.send_frames(iter([b"\x00\x01" * 160] * 3))
+
+        assert len(sock.sent) == 0
+        assert sender.packets_sent == 0
+        assert sender.bytes_sent == 0
+        assert sender.simulated_drops == 3
+        assert sender.current_timestamp == (initial_timestamp + 3 * sender.samples_per_frame) & 0xFFFFFFFF
+
+    def test_simulated_packet_loss_preserves_rtp_sequence_progression(self):
+        sock = _DummyUdpSocket()
+        random_values = iter([0.9, 0.1, 0.9])
+
+        sender = RtpSender(
+            sock,
+            "127.0.0.1",
+            5004,
+            frame_duration_ms=0.0,
+            packet_loss=0.5,
+            random_func=lambda: next(random_values),
+        )
+
+        sender.send_frames(iter([b"\x00\x01" * 160] * 3))
+
+        assert sender.packets_sent == 2
+        assert sender.simulated_drops == 1
+
+        first_pkt = RtpPacket.parse(sock.sent[0][0])
+        second_pkt = RtpPacket.parse(sock.sent[1][0])
+        assert second_pkt.sequence_number == (first_pkt.sequence_number + 2) & 0xFFFF
+
+    def test_invalid_packet_loss_probability_raises_value_error(self):
+        with pytest.raises(ValueError, match="packet_loss"):
+            RtpSender(_DummyUdpSocket(), "127.0.0.1", 5004, packet_loss=1.5)
+
 
 class TestJitterBuffer:
     def test_flush_preserves_wraparound_order(self):
@@ -161,3 +207,13 @@ class TestJitterBuffer:
         flushed = jb.push(1, b"e")
 
         assert flushed == [b"c", b"d", b"e"]
+
+    def test_flush_with_sequence_preserves_wraparound_order(self):
+        jb = JitterBuffer(max_depth=3)
+
+        assert jb.push_with_sequence(65533, b"a") == [(65533, b"a")]
+        assert jb.push_with_sequence(65535, b"c") == []
+        assert jb.push_with_sequence(0, b"d") == []
+        flushed = jb.push_with_sequence(1, b"e")
+
+        assert flushed == [(65535, b"c"), (0, b"d"), (1, b"e")]

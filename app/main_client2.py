@@ -35,6 +35,7 @@ def run() -> None:
     logger.info("  RTP  : listening on %s:%d", cfg.CLIENT2_IP, cfg.CLIENT2_RTP_PORT)
     logger.info("  Output WAV: %s", cfg.OUTPUT_WAV)
     logger.info("  Two-way mode: %s", cfg.TWO_WAY_CALL)
+    logger.info("  RTP packet loss (sender): %.2f", cfg.PACKET_LOSS)
 
     # -----------------------------------------------------------------------
     # Build callee SDP answer
@@ -135,6 +136,7 @@ def run() -> None:
                 payload_type=cfg.PAYLOAD_TYPE,
                 samples_per_frame=uplink_source.samples_per_frame,
                 frame_duration_ms=cfg.FRAME_DURATION_MS,
+                packet_loss=cfg.PACKET_LOSS,
             )
             rtcp_sock = UdpSocketAdapter(cfg.CLIENT2_IP, cfg.CLIENT2_RTCP_PORT)
             rtcp_sock.open()

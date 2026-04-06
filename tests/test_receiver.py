@@ -5,6 +5,7 @@ from __future__ import annotations
 import socket
 import time
 
+from rtp.jitter_buffer import JitterBuffer
 from rtp.packet import RtpPacket
 from rtp.receiver import RtpReceiver
 
@@ -72,3 +73,31 @@ def test_receiver_start_stop_is_idempotent():
     receiver.stop()
 
     assert receiver.packets_received >= 1
+
+
+def test_receiver_inserts_silence_for_missing_sequence_numbers():
+    first = b"\x01\x02" * 160
+    third = b"\x03\x04" * 160
+    sock = _FakeRecvSocket([
+        _rtp(0x11111111, 1, first),
+        _rtp(0x11111111, 3, third),
+    ])
+    receiver = RtpReceiver(
+        sock=sock,
+        payload_type=96,
+        jitter_buffer=JitterBuffer(max_depth=2),
+    )
+
+    receiver.start()
+    time.sleep(0.05)
+    receiver.stop()
+
+    frame1 = receiver.get_frame(timeout=0.01)
+    frame2 = receiver.get_frame(timeout=0.01)
+    frame3 = receiver.get_frame(timeout=0.01)
+
+    assert frame1 == first
+    assert frame2 == b"\x00" * len(first)
+    assert frame3 == third
+    assert receiver.packets_lost == 1
+    assert receiver.concealment_frames_inserted == 1

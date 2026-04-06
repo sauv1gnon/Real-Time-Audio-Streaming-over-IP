@@ -131,6 +131,7 @@ variables:
 - The project includes `.env.example`, `.env.client1`, and `.env.client2`.
 - Use `ENV_FILE=<path>` to load a specific profile file.
 - If `ENV_FILE` is not set, `.env` is loaded automatically (when present).
+- `PACKET_LOSS` is sender-side RTP drop simulation only (SIP and RTCP are unaffected).
 
 | Variable | Default | Description |
 |---|---|---|
@@ -150,6 +151,7 @@ variables:
 | `LIVE_PLAYBACK` | `false` | Enables sounddevice live playback (set `true` only if stable on your machine) |
 | `RTCP_INTERVAL_S` | `5` | RTCP SR interval in seconds |
 | `SIP_TIMEOUT_S` | `10` | SIP socket receive timeout |
+| `PACKET_LOSS` | `0.00` | RTP sender packet loss probability (double) from `0.00` to `1.00`; blank/missing uses no loss |
 
 ---
 

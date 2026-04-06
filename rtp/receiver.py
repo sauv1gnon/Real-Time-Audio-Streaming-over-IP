@@ -54,7 +54,11 @@ class RtpReceiver:
         self._frames_dropped: int = 0
         self._receive_errors: int = 0
         self._ssrc_drops: int = 0
+        self._packets_lost: int = 0
+        self._concealment_frames_inserted: int = 0
         self._last_error: str | None = None
+        self._expected_playout_seq: int | None = None
+        self._concealment_frame_size: int | None = None
 
     # ---------------------------------------------------------------------------
     # Control
@@ -118,6 +122,16 @@ class RtpReceiver:
             return self._ssrc_drops
 
     @property
+    def packets_lost(self) -> int:
+        with self._stats_lock:
+            return self._packets_lost
+
+    @property
+    def concealment_frames_inserted(self) -> int:
+        with self._stats_lock:
+            return self._concealment_frames_inserted
+
+    @property
     def last_error(self) -> str | None:
         with self._stats_lock:
             return self._last_error
@@ -135,6 +149,46 @@ class RtpReceiver:
     # ---------------------------------------------------------------------------
     # Internal
     # ---------------------------------------------------------------------------
+
+    def _queue_payload(self, payload: bytes, seq: int, *, concealment: bool = False) -> None:
+        try:
+            self._queue.put_nowait(payload)
+        except queue.Full:
+            with self._stats_lock:
+                self._frames_dropped += 1
+            if concealment:
+                logger.warning("RTP receiver queue full — dropping concealment frame seq=%d", seq)
+            else:
+                logger.warning("RTP receiver queue full — dropping frame seq=%d", seq)
+
+    def _emit_frames(self, frames: list[tuple[int, bytes]]) -> None:
+        for seq, payload in frames:
+            if self._concealment_frame_size is None:
+                self._concealment_frame_size = len(payload)
+
+            if self._expected_playout_seq is None:
+                self._expected_playout_seq = seq
+
+            delta = (seq - self._expected_playout_seq) & 0xFFFF
+            if delta >= 0x8000:
+                logger.debug(
+                    "Dropping late/out-of-order RTP frame seq=%d expected=%d",
+                    seq,
+                    self._expected_playout_seq,
+                )
+                continue
+
+            if delta > 0:
+                silence_size = self._concealment_frame_size or len(payload)
+                for offset in range(delta):
+                    missing_seq = (self._expected_playout_seq + offset) & 0xFFFF
+                    self._queue_payload(b"\x00" * silence_size, missing_seq, concealment=True)
+                with self._stats_lock:
+                    self._packets_lost += delta
+                    self._concealment_frames_inserted += delta
+
+            self._queue_payload(payload, seq)
+            self._expected_playout_seq = (seq + 1) & 0xFFFF
 
     def _receive_loop(self) -> None:
         while not self._stop_event.is_set():
@@ -184,26 +238,11 @@ class RtpReceiver:
                 len(pkt.payload),
             )
 
-            payloads = [pkt.payload]
+            frames = [(pkt.sequence_number, pkt.payload)]
             if self._jitter_buffer is not None:
-                payloads = self._jitter_buffer.push(pkt.sequence_number, pkt.payload)
+                frames = self._jitter_buffer.push_with_sequence(pkt.sequence_number, pkt.payload)
 
-            for payload in payloads:
-                try:
-                    self._queue.put_nowait(payload)
-                except queue.Full:
-                    with self._stats_lock:
-                        self._frames_dropped += 1
-                    logger.warning(
-                        "RTP receiver queue full — dropping frame seq=%d",
-                        pkt.sequence_number,
-                    )
+            self._emit_frames(frames)
 
         if self._jitter_buffer is not None:
-            for payload in self._jitter_buffer.flush():
-                try:
-                    self._queue.put_nowait(payload)
-                except queue.Full:
-                    with self._stats_lock:
-                        self._frames_dropped += 1
-                    logger.warning("RTP receiver queue full — dropping flushed frame")
+            self._emit_frames(self._jitter_buffer.flush_with_sequence())

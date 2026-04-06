@@ -23,7 +23,6 @@ def parse(raw: bytes) -> SipMessage:
     except UnicodeDecodeError as exc:
         raise SipParseError(f"Cannot decode SIP bytes: {exc}") from exc
 
-    # Split header section from body on double CRLF
     if "\r\n\r\n" in text:
         header_section, body = text.split("\r\n\r\n", 1)
     else:
@@ -68,7 +67,6 @@ def parse(raw: bytes) -> SipMessage:
             raise SipParseError(f"Unsupported SIP method: {method!r}")
         msg = SipRequest(method, request_uri)
 
-    # Parse headers
     for line in lines[1:]:
         if not line.strip():
             continue
@@ -77,7 +75,6 @@ def parse(raw: bytes) -> SipMessage:
         name, _, value = line.partition(":")
         msg.set_header(name.strip(), value.strip())
 
-    # Attach body, respecting Content-Length when present
     cl_str = msg.get_header("Content-Length").strip()
     if not cl_str:
         msg.body = body

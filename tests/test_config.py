@@ -57,3 +57,30 @@ def test_env_file_overrides_existing_process_env(monkeypatch, tmp_path):
     cfg = _reload_config_module(clear_env_file=False)
 
     assert cfg.CLIENT1_SIP_PORT == 6060
+
+
+def test_packet_loss_missing_or_blank_falls_back_to_default(monkeypatch):
+    monkeypatch.delenv("PACKET_LOSS", raising=False)
+    cfg = _reload_config_module()
+    assert cfg.PACKET_LOSS == 0.0
+
+    monkeypatch.setenv("PACKET_LOSS", "   ")
+    cfg = _reload_config_module()
+    assert cfg.PACKET_LOSS == 0.0
+
+
+@pytest.mark.parametrize("value", ["0.00", "1.00", "0.25"])
+def test_packet_loss_accepts_valid_probability_range(monkeypatch, value):
+    monkeypatch.setenv("PACKET_LOSS", value)
+
+    cfg = _reload_config_module()
+
+    assert cfg.PACKET_LOSS == float(value)
+
+
+@pytest.mark.parametrize("value", ["-0.01", "1.01", "abc"])
+def test_packet_loss_rejects_invalid_values(monkeypatch, value):
+    monkeypatch.setenv("PACKET_LOSS", value)
+
+    with pytest.raises(ValueError, match="PACKET_LOSS"):
+        _reload_config_module()

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import random
 import threading
 from typing import Iterator
@@ -50,7 +51,12 @@ class RtpSender:
         samples_per_frame: int = _SAMPLES_PER_FRAME,
         frame_duration_ms: float = _FRAME_DURATION_MS,
         max_send_errors: int = 10,
+        packet_loss: float = 0.0,
+        random_func: Callable[[], float] | None = None,
     ) -> None:
+        if packet_loss < 0.0 or packet_loss > 1.0:
+            raise ValueError(f"packet_loss must be within [0.0, 1.0], got {packet_loss}")
+
         self._sock = sock
         self.remote_ip = remote_ip
         self.remote_port = remote_port
@@ -59,12 +65,15 @@ class RtpSender:
         self.samples_per_frame = samples_per_frame
         self.frame_duration_ms = frame_duration_ms
         self.max_send_errors = max_send_errors
+        self.packet_loss = packet_loss
 
         self._seq: int = random.randint(0, 65535)
         self._timestamp: int = random.randint(0, 0xFFFFFFFF)
         self._packets_sent: int = 0
         self._bytes_sent: int = 0
         self._send_errors: int = 0
+        self._simulated_drops: int = 0
+        self._random_value = random_func if random_func is not None else random.random
         self._stats_lock = threading.Lock()
 
     # ---------------------------------------------------------------------------
@@ -90,6 +99,11 @@ class RtpSender:
     def send_errors(self) -> int:
         with self._stats_lock:
             return self._send_errors
+
+    @property
+    def simulated_drops(self) -> int:
+        with self._stats_lock:
+            return self._simulated_drops
 
     def get_stats_snapshot(self) -> tuple[int, int, int]:
         """Return a consistent (packets, octets, current_timestamp) snapshot."""
@@ -123,6 +137,20 @@ class RtpSender:
             data = pkt.serialize()
 
             sleep_until(next_send_ms)
+            if self.packet_loss > 0.0 and self._random_value() < self.packet_loss:
+                with self._stats_lock:
+                    self._simulated_drops += 1
+                    self._seq = (self._seq + 1) & 0xFFFF
+                    self._timestamp = (self._timestamp + self.samples_per_frame) & 0xFFFFFFFF
+                logger.debug(
+                    "RTP simulated drop  seq=%d  ts=%d  drop_rate=%.2f",
+                    pkt.sequence_number,
+                    pkt.timestamp,
+                    self.packet_loss,
+                )
+                next_send_ms += self.frame_duration_ms
+                continue
+
             try:
                 self._sock.send(data, self.remote_ip, self.remote_port)
             except OSError as exc:
@@ -166,8 +194,9 @@ class RtpSender:
             )
 
         logger.info(
-            "RTP sender done: %d packets / %d bytes sent (send_errors=%d)",
+            "RTP sender done: %d packets / %d bytes sent (send_errors=%d, simulated_drops=%d)",
             self.packets_sent,
             self.bytes_sent,
             self.send_errors,
+            self.simulated_drops,
         )

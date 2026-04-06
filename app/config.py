@@ -165,3 +165,9 @@ LIVE_PLAYBACK: bool = _env_bool("LIVE_PLAYBACK", False)
 # ---------------------------------------------------------------------------
 
 SIP_TIMEOUT_S: float = _env_float("SIP_TIMEOUT_S", 10.0, min_value=0.1)
+
+# ---------------------------------------------------------------------------
+# RTP packet loss simulation (sender-side probability)
+# ---------------------------------------------------------------------------
+
+PACKET_LOSS: float = _env_float("PACKET_LOSS", 0.0, min_value=0.0, max_value=1.0)
