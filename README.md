@@ -130,6 +130,11 @@ variables:
 | `CLIENT2_RTP_PORT` | `10002` | Callee RTP port |
 | `SAMPLE_WAV` | `assets/sample.wav` | Audio file to stream |
 | `OUTPUT_WAV` | `received_audio.wav` | Where Client 2 saves received audio |
+| `OUTPUT_WAV_CALLER` | `received_audio_client1.wav` | Where Client 1 saves received audio in two-way mode |
+| `AUDIO_SOURCE` | `wav` | `wav` or `mic` |
+| `MIC_DURATION_S` | `5.0` | Microphone capture duration (seconds) |
+| `TWO_WAY_CALL` | `false` | Enables simultaneous uplink from Client 2 to Client 1 |
+| `LIVE_PLAYBACK` | `false` | Enables sounddevice live playback (set `true` only if stable on your machine) |
 | `RTCP_INTERVAL_S` | `5` | RTCP SR interval in seconds |
 | `SIP_TIMEOUT_S` | `10` | SIP socket receive timeout |
 
@@ -146,6 +151,34 @@ CLIENT2_IP=192.168.1.20 CLIENT1_IP=192.168.1.10 python -m app.main_client2
 ```
 
 Ensure that no firewall blocks UDP on ports 5060, 5061, 10000–10003.
+
+### Bonus mode: microphone and two-way call
+
+Install optional audio dependencies:
+
+```bash
+pip install sounddevice numpy
+```
+
+One-way microphone (Client 1 mic -> Client 2):
+
+```bash
+# Terminal 1
+python -m app.main_client2
+
+# Terminal 2
+AUDIO_SOURCE=mic MIC_DURATION_S=8 python -m app.main_client1
+```
+
+Two-way microphone call:
+
+```bash
+# Terminal 1
+AUDIO_SOURCE=mic TWO_WAY_CALL=true MIC_DURATION_S=8 python -m app.main_client2
+
+# Terminal 2
+AUDIO_SOURCE=mic TWO_WAY_CALL=true MIC_DURATION_S=8 python -m app.main_client1
+```
 
 ---
 

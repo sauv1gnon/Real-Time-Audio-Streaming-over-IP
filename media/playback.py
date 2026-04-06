@@ -58,14 +58,16 @@ class AudioPlaybackSink:
         sample_width: int = 2,
         output_path: Optional[str | Path] = None,
         queue_maxsize: int = 500,
+        enable_live_playback: bool = False,
     ) -> None:
         self.sample_rate = sample_rate
         self.channels = channels
         self.sample_width = sample_width
         self.output_path = Path(output_path) if output_path else None
         self.queue_maxsize = queue_maxsize
+        self.enable_live_playback = enable_live_playback
 
-        self._sd = _try_import_sounddevice()
+        self._sd = _try_import_sounddevice() if self.enable_live_playback else None
         self._queue: queue.Queue[bytes | None] = queue.Queue(maxsize=queue_maxsize)
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
@@ -87,8 +89,10 @@ class AudioPlaybackSink:
 
         if self._sd is not None:
             logger.info("Live playback via sounddevice at %d Hz", self.sample_rate)
+        elif self.enable_live_playback:
+            logger.info("Live playback requested but sounddevice unavailable — file output only")
         else:
-            logger.info("sounddevice unavailable — audio saved to file only")
+            logger.info("Live playback disabled — audio saved to file only")
 
     def stop(self) -> None:
         """Stop playback and close the output WAV file."""

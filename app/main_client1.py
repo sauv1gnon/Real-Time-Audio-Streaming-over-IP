@@ -14,10 +14,13 @@ from pathlib import Path
 
 from app import config as cfg
 from core.log import get_logger
-from media.packetizer import AudioFramePacketizer
+from media.mic_source import MicrophoneAudioSource
 from media.wav_reader import WavAudioSource
+from media.playback import AudioPlaybackSink
 from net.udp import UdpSocketAdapter
 from rtp.rtcp import RtcpReporter
+from rtp.receiver import RtpReceiver
+from rtp.jitter_buffer import JitterBuffer
 from rtp.sender import RtpSender
 from sip.sdp import SdpDescription
 from sip.session import CallerSession, CallerState
@@ -27,19 +30,32 @@ logger = get_logger("app.client1")
 
 def run() -> None:
     logger.info("=== Client 1 (Caller) starting ===")
-    logger.info("  SIP  : %s:%d → %s:%d", cfg.CLIENT1_IP, cfg.CLIENT1_SIP_PORT,
+    logger.info("  SIP  : %s:%d -> %s:%d", cfg.CLIENT1_IP, cfg.CLIENT1_SIP_PORT,
                 cfg.CLIENT2_IP, cfg.CLIENT2_SIP_PORT)
-    logger.info("  RTP  : %s:%d → %s:%d", cfg.CLIENT1_IP, cfg.CLIENT1_RTP_PORT,
+    logger.info("  RTP  : %s:%d -> %s:%d", cfg.CLIENT1_IP, cfg.CLIENT1_RTP_PORT,
                 cfg.CLIENT2_IP, cfg.CLIENT2_RTP_PORT)
-    logger.info("  RTCP : %s:%d → %s:%d", cfg.CLIENT1_IP, cfg.CLIENT1_RTCP_PORT,
+    logger.info("  RTCP : %s:%d -> %s:%d", cfg.CLIENT1_IP, cfg.CLIENT1_RTCP_PORT,
                 cfg.CLIENT2_IP, cfg.CLIENT2_RTCP_PORT)
-    logger.info("  Audio: %s", cfg.SAMPLE_WAV)
+    logger.info("  Audio source: %s", cfg.AUDIO_SOURCE)
+    if cfg.AUDIO_SOURCE == "wav":
+        logger.info("  Audio file: %s", cfg.SAMPLE_WAV)
+    else:
+        logger.info("  Mic duration: %.1f s", cfg.MIC_DURATION_S)
+    logger.info("  Two-way mode: %s", cfg.TWO_WAY_CALL)
 
     # -----------------------------------------------------------------------
-    # Load and validate WAV
+    # Build local audio source (WAV or microphone)
     # -----------------------------------------------------------------------
-    wav_path = Path(cfg.SAMPLE_WAV)
-    source = WavAudioSource(wav_path, frame_duration_ms=cfg.FRAME_DURATION_MS)
+    if cfg.AUDIO_SOURCE == "mic":
+        source = MicrophoneAudioSource(
+            sample_rate=cfg.SAMPLE_RATE,
+            channels=cfg.CHANNELS,
+            frame_duration_ms=cfg.FRAME_DURATION_MS,
+            duration_s=cfg.MIC_DURATION_S,
+        )
+    else:
+        wav_path = Path(cfg.SAMPLE_WAV)
+        source = WavAudioSource(wav_path, frame_duration_ms=cfg.FRAME_DURATION_MS)
     source.open()
 
     # -----------------------------------------------------------------------
@@ -61,6 +77,10 @@ def run() -> None:
     rtp_sock: UdpSocketAdapter | None = None
     rtcp_sock: UdpSocketAdapter | None = None
     reporter: RtcpReporter | None = None
+    receiver: RtpReceiver | None = None
+    playback_sink: AudioPlaybackSink | None = None
+    playback_pump_thread: threading.Thread | None = None
+    playback_pump_stop = threading.Event()
     session: CallerSession | None = None
     call_established = False
 
@@ -120,8 +140,34 @@ def run() -> None:
         )
         reporter.start()
 
-        packetizer = AudioFramePacketizer(source)
-        sender.send_frames(packetizer.frame_iterator(), stop_event=stop_event)
+        if cfg.TWO_WAY_CALL:
+            playback_sink = AudioPlaybackSink(
+                sample_rate=cfg.SAMPLE_RATE,
+                channels=cfg.CHANNELS,
+                sample_width=cfg.SAMPLE_WIDTH,
+                output_path=cfg.OUTPUT_WAV_CALLER,
+                enable_live_playback=cfg.LIVE_PLAYBACK,
+            )
+            receiver = RtpReceiver(
+                sock=rtp_sock,
+                payload_type=cfg.PAYLOAD_TYPE,
+                jitter_buffer=JitterBuffer(max_depth=5),
+            )
+            playback_sink.start()
+            receiver.start()
+
+            def _playback_pump() -> None:
+                while not playback_pump_stop.is_set():
+                    frame = receiver.get_frame(timeout=0.2)
+                    if frame is not None:
+                        playback_sink.push(frame)
+
+            playback_pump_thread = threading.Thread(
+                target=_playback_pump, daemon=True, name="caller-playback-pump"
+            )
+            playback_pump_thread.start()
+
+        sender.send_frames(source.frames(), stop_event=stop_event)
 
     finally:
         if call_established and session is not None and session.state == CallerState.ESTABLISHED:
@@ -137,6 +183,19 @@ def run() -> None:
                 reporter.stop()
             except Exception as exc:
                 logger.warning("Failed to stop RTCP reporter cleanly: %s", exc)
+        playback_pump_stop.set()
+        if playback_pump_thread is not None:
+            playback_pump_thread.join(timeout=1.0)
+        if receiver is not None:
+            try:
+                receiver.stop()
+            except Exception as exc:
+                logger.warning("Failed to stop RTP receiver cleanly: %s", exc)
+        if playback_sink is not None:
+            try:
+                playback_sink.stop()
+            except Exception as exc:
+                logger.warning("Failed to stop playback sink cleanly: %s", exc)
 
         if rtp_sock is not None:
             rtp_sock.close()

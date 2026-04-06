@@ -45,6 +45,13 @@ def _env_float(
 		raise ValueError(f"{name} must be <= {max_value}, got {value}")
 	return value
 
+
+def _env_bool(name: str, default: bool = False) -> bool:
+	raw = os.getenv(name)
+	if raw is None or raw.strip() == "":
+		return default
+	return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
+
 # ---------------------------------------------------------------------------
 # IP addressing (LAN or localhost)
 # ---------------------------------------------------------------------------
@@ -92,6 +99,21 @@ RTCP_INTERVAL_S: float = _env_float("RTCP_INTERVAL_S", 5.0, min_value=0.1)
 
 SAMPLE_WAV: str = os.getenv("SAMPLE_WAV", "assets/sample.wav")
 OUTPUT_WAV: str = os.getenv("OUTPUT_WAV", "received_audio.wav")
+OUTPUT_WAV_CALLER: str = os.getenv("OUTPUT_WAV_CALLER", "received_audio_client1.wav")
+
+# Audio source:
+#   wav = use SAMPLE_WAV
+#   mic = use microphone capture (bonus)
+AUDIO_SOURCE: str = os.getenv("AUDIO_SOURCE", "wav").strip().lower()
+if AUDIO_SOURCE not in {"wav", "mic"}:
+	raise ValueError(f"AUDIO_SOURCE must be 'wav' or 'mic', got {AUDIO_SOURCE!r}")
+
+# Bonus mode controls
+MIC_DURATION_S: float = _env_float("MIC_DURATION_S", 5.0, min_value=0.2)
+TWO_WAY_CALL: bool = _env_bool("TWO_WAY_CALL", False)
+# Keep false by default for stable demo runs on systems where native
+# sounddevice playback can crash in high-rate two-way mode.
+LIVE_PLAYBACK: bool = _env_bool("LIVE_PLAYBACK", False)
 
 # ---------------------------------------------------------------------------
 # SIP socket timeout (seconds)
